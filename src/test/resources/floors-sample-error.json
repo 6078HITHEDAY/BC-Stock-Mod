@@ -1,0 +1,8 @@
+{
+  "interval": "15m",
+  "floors": [],
+  "last_refreshed": 1790505689.95,
+  "last_error": "poll failed: timeout",
+  "last_external_error": null,
+  "poll_interval": 300.0
+}

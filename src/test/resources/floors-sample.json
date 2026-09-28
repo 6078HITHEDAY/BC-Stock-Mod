@@ -1,0 +1,42 @@
+{
+  "interval": "15m",
+  "floors": [
+    {
+      "company_id": 10,
+      "company_name": "帕拉伦联合储蓄",
+      "risk_level": 1,
+      "current": 61.76,
+      "floor": 60.0,
+      "initial_price": 100.0,
+      "danger_zone": 60.4,
+      "distance_pct": 2.9333,
+      "low_tick_age": 5590,
+      "bounce_confirmed": true,
+      "in_danger_zone": false,
+      "status": "floor_confirmed_low",
+      "crash_risk_per_tick": 0.0,
+      "reason": "触底·崩盘区外"
+    },
+    {
+      "company_id": 55,
+      "company_name": "月港控股",
+      "risk_level": 3,
+      "current": 42.38,
+      "floor": 42.0,
+      "initial_price": 2970.0,
+      "danger_zone": 42.294,
+      "distance_pct": 0.9048,
+      "low_tick_age": 12,
+      "bounce_confirmed": false,
+      "in_danger_zone": true,
+      "status": "near",
+      "crash_risk_per_tick": 0.12,
+      "reason": "近地板"
+    }
+  ],
+  "external_source": "self",
+  "last_refreshed": 1790505689.95,
+  "last_error": null,
+  "last_external_error": null,
+  "poll_interval": 300.0
+}

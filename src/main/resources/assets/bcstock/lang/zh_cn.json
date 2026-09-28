@@ -1,0 +1,6 @@
+{
+  "key.bcstock.probe": "强制探测当前容器（dump 槽位与 lore）",
+  "key.bcstock.debug.send": "BC Stock 调试：发一条查询",
+  "key.bcstock.board": "BC Stock 打开盘面",
+  "key.bcstock.hud": "BC Stock 开关盯盘条"
+}

@@ -1,0 +1,23 @@
+# 构建产物
+# 这些模式一律锚定仓库根（前导 /）：不锚定的 `build/`、`bcstock/`
+# 会连同名子目录一起吃掉——`bcstock/` 曾把 Java 包 cn/myflycat/bcstock/ 整个挡掉。
+/.gradle/
+/build/
+/run/
+/logs/
+/remappedSrc/
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.eclipse/
+
+# 本地数据（账本、快照流水）——实际写在游戏目录，不在本仓库，
+# 这里只是防御性挡一下仓库根的同名目录。
+/bcstock/
+
+# Python
+__pycache__/
+*.pyc

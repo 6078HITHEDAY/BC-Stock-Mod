@@ -1,0 +1,6 @@
+{
+  "key.bcstock.probe": "Force-probe current container (dump slots and lore)",
+  "key.bcstock.debug.send": "BC Stock debug: send one query",
+  "key.bcstock.board": "BC Stock: open board",
+  "key.bcstock.hud": "BC Stock: toggle watch HUD"
+}

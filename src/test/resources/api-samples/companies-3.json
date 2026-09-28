@@ -1,0 +1,32 @@
+[
+  {
+    "id": 55,
+    "market_id": 56,
+    "name": "月港控股",
+    "risk_level": 3,
+    "status": "交易中",
+    "latest_price": 44.21,
+    "change_pct": -27.94980443285528,
+    "available_shares": 150000
+  },
+  {
+    "id": 57,
+    "market_id": 58,
+    "name": "红苹果短剧",
+    "risk_level": 5,
+    "status": "已破产",
+    "latest_price": 0.0,
+    "change_pct": -100.0,
+    "available_shares": null
+  },
+  {
+    "id": 1,
+    "market_id": 5,
+    "name": "赤石科技",
+    "risk_level": 5,
+    "status": "已破产",
+    "latest_price": 0.0,
+    "change_pct": null,
+    "available_shares": null
+  }
+]
