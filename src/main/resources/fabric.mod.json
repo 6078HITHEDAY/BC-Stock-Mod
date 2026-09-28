@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "bcstock",
-  "version": "0.1.0-r5-auto",
+  "version": "0.0.1",
   "name": "BCStock",
   "description": "帕拉伦股市客户端：HUD 盯盘、盘面/详情/手动下单、地板模型建议（自动档默认只建议，不自动发包）",
   "authors": ["myflycat"],
