@@ -37,6 +37,9 @@ HUD 和一张盘面里，让你不用反复敲 `/invest` 就能盯盘、比较�
 | **本地账本** | 内嵌 H2 数据库记录成交与快照流水，重启不丢 |
 | **降级不崩** | API 挂掉时自动降档：只显示命令能给的数据，下单入口灰显禁用 |
 
+## 结构示意
+<img width="5077" height="6302" alt="diagram (1)" src="https://github.com/user-attachments/assets/a99f0c5e-ac04-4167-a8a3-6f60565190e4" />
+
 ## 安装
 
 **前置：**
