@@ -9,6 +9,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
@@ -77,9 +78,21 @@ public final class MarketPollScheduler {
      * @param phaseIdForLog 失败日志去重用；启动首次传 {@link Long#MIN_VALUE} 表示总打一行
      */
     public ApiClient.Result pollOnce(long phaseIdForLog) {
+        return pollOnce(phaseIdForLog, null);
+    }
+
+    /**
+     * @param stillValid 非空时：HTTP 回来后、落盘前再验；失败则丢弃结果（断线 / 换服）。
+     *                   测试与无门禁路径传 null。
+     */
+    public ApiClient.Result pollOnce(long phaseIdForLog, BooleanSupplier stillValid) {
         pollCount.incrementAndGet();
         ApiClient client = clientFactory.get();
         ApiClient.Result result = client.fetch();
+        if (stillValid != null && !stillValid.getAsBoolean()) {
+            BcStockLog.info("行情结果丢弃（门禁已失效）");
+            return ApiClient.Result.failed();
+        }
         Instant now = Instant.ofEpochMilli(clock.getAsLong());
         if (result.ok()) {
             store.updateCompanies(result.companies(), true, now);
@@ -115,13 +128,17 @@ public final class MarketPollScheduler {
      * @return 是否真的开了新任务（已在飞则 false）
      */
     public boolean pollOnceAsync(Consumer<Boolean> onDone) {
+        return pollOnceAsync(onDone, null);
+    }
+
+    public boolean pollOnceAsync(Consumer<Boolean> onDone, BooleanSupplier stillValid) {
         if (!inFlight.compareAndSet(false, true)) {
             return false;
         }
         executor().execute(() -> {
             boolean ok = false;
             try {
-                ok = pollOnce(Long.MIN_VALUE).ok();
+                ok = pollOnce(Long.MIN_VALUE, stillValid).ok();
             } finally {
                 inFlight.set(false);
                 if (onDone != null) {
