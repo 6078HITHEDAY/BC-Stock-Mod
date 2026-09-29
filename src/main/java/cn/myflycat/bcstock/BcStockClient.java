@@ -30,6 +30,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
+import net.minecraft.client.network.ServerInfo;
 
 /**
  * mod 的客户端入口。
@@ -37,7 +38,7 @@ import net.minecraft.client.network.ClientPlayNetworkHandler;
  * <p>纯客户端 mod（{@code fabric.mod.json} 里 {@code environment = "client"}），
  * 服务端一行都不用改，也不该改。
  *
- * <p>三层的包结构已经按分层设计预留好，M0 只有 {@code probe} 包是实的：
+ * <p>三层的包结构已经按 PLAN.md §2 预留好，M0 只有 {@code probe} 包是实的：
  * <ul>
  *   <li>{@code ui} —— 展示层（HUD / GUI 覆盖层 / 独立面板）</li>
  *   <li>{@code decision} —— 决策层（BCquant 地板模型移植，纯数学，可离线测）</li>
@@ -70,12 +71,18 @@ public final class BcStockClient implements ClientModInitializer {
         logMixinStatus();
     }
 
+    /** 人在线且落在目标服。单机 / 其他服一律 false。 */
+    private static boolean playerOnTargetServer() {
+        if (!ServerGate.active()) {
+            return false;
+        }
+        MinecraftClient client = MinecraftClient.getInstance();
+        return client != null && client.player != null && client.getNetworkHandler() != null;
+    }
+
     private static void wireCollectScheduler() {
         CollectScheduler.SHARED.setGateway(CommandGateway.SHARED);
-        CollectScheduler.SHARED.setConnected(() -> {
-            MinecraftClient client = MinecraftClient.getInstance();
-            return client != null && client.player != null && client.getNetworkHandler() != null;
-        });
+        CollectScheduler.SHARED.setConnected(BcStockClient::playerOnTargetServer);
         ClientTickEvents.END_CLIENT_TICK.register(client -> CollectScheduler.SHARED.tick());
         BcStockLog.info("采集调度已挂上（默认关；改 config/bcstock.json 或 -D 覆盖）");
     }
@@ -83,9 +90,13 @@ public final class BcStockClient implements ClientModInitializer {
     /**
      * 把游戏里的 {@code sendChatCommand} 和 tick 接到网关。
      * <b>这里不发任何命令</b>——只把管子接上，等人或后续 Task 来调 {@code trySend*}。
+     * 非目标服 sender 直接拒，调度器漏判也不会往别的服发包。
      */
     private static void wireCommandGateway() {
         CommandGateway.SHARED.setSender(command -> {
+            if (!ServerGate.active()) {
+                return false;
+            }
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null || client.player.networkHandler == null) {
                 return false;
@@ -102,22 +113,19 @@ public final class BcStockClient implements ClientModInitializer {
 
     private static void wireMarketPoll() {
         MarketRefreshCoordinator.SHARED.setClock(System::currentTimeMillis);
-        MarketRefreshCoordinator.SHARED.setConnected(() -> {
-            MinecraftClient client = MinecraftClient.getInstance();
-            return client != null && client.player != null && client.getNetworkHandler() != null;
-        });
+        MarketRefreshCoordinator.SHARED.setConnected(BcStockClient::playerOnTargetServer);
         MarketRefreshCoordinator.SHARED.setGateway(CommandGateway.SHARED);
         MarketRefreshCoordinator.SHARED.setStore(SnapshotStore.SHARED);
         MarketRefreshCoordinator.SHARED.setPoller(MarketPollScheduler.SHARED);
         MarketRefreshCoordinator.SHARED.setCollect(CollectScheduler.SHARED);
         CommandGateway.SHARED.setOnMarketUpdated(MarketRefreshCoordinator.SHARED::onBroadcast);
         ClientTickEvents.END_CLIENT_TICK.register(client -> MarketRefreshCoordinator.SHARED.tick());
-        BcStockLog.info("行情刷新：进服 API 全量，聊天增量，20 分钟兜底");
+        BcStockLog.info("行情刷新：进目标服 API 全量，聊天增量，20 分钟兜底");
     }
 
     /**
-     * 启动：行情缓存秒开 → JSONL 恢复持仓/余额 → 后台拉 API。
-     * 失败只降级，不发聊天命令、不崩游戏。
+     * 启动只恢复本地文件（行情缓存 + JSONL），不拉 API、不把刷新状态机跑起来。
+     * API 全量改到匹配成功的 {@link #wireLedger} JOIN。
      *
      * <p>缓存与 JSONL 用途不同：{@code market-cache.json} 可覆盖的最新行情；
      * {@code snapshots.jsonl} append-only 历史。二者并存。
@@ -133,7 +141,7 @@ public final class BcStockClient implements ClientModInitializer {
         MarketPollScheduler.SHARED.setCacheFile(cacheFile);
         MarketRefreshCoordinator.SHARED.setCacheFile(cacheFile);
 
-        // 1) 行情缓存立刻灌内存（market_id 已抹）——界面毫秒级有数字。
+        // 1) 行情缓存立刻灌内存（market_id 已抹）——进目标服后界面毫秒级有数字。
         MarketCache.read(cacheFile).ifPresent(payload -> {
             List<CompanyView> views = MarketCache.toViewsWipingMarketId(payload);
             if (views.isEmpty()) {
@@ -162,27 +170,22 @@ public final class BcStockClient implements ClientModInitializer {
             }
             BcStockLog.info("从本地 JSONL 恢复上一份快照（编号已抹成未知）");
         });
-
-        Thread poll = new Thread(() -> {
-            MarketRefreshCoordinator.SHARED.onJoinPoll();
-            StockSnapshot snap = SnapshotStore.SHARED.get();
-            DegradePolicy policy = DegradePolicy.of(snap, CommandGateway.SHARED);
-            BcStockLog.info("降级：{}", policy);
-            BcStockLog.info("快照打印：公司 {} 家 / 持仓 {} / 余额 {} / 降级 {}",
-                    snap.companies().size(),
-                    snap.holdingsKnown() ? snap.holdingsOrEmpty().size() + " 家" : "未知",
-                    snap.wallet().known() ? snap.wallet().balance() : "未知",
-                    policy);
-        }, "bcstock-api");
-        poll.setDaemon(true);
-        poll.start();
     }
 
     /**
-     * 第一次进服、拿到玩家 UUID 再建库。没进服不建空库。
+     * 进目标服才开账本 + API 全量；单机 / 其他服保持关闭。
      */
     private static void wireLedger() {
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+            ServerInfo info = client.getCurrentServerEntry();
+            String address = (info == null) ? null : info.address;
+            if (!ServerGate.matches(address)) {
+                ServerGate.clear();
+                BcStockLog.info("非目标服（{}），BC Stock 保持关闭",
+                        address == null ? "单机/无地址" : address);
+                return;
+            }
+            ServerGate.setActive(true);
             UUID uuid = null;
             if (client.player != null) {
                 uuid = client.player.getUuid();
@@ -192,9 +195,29 @@ public final class BcStockClient implements ClientModInitializer {
             }
             String id = (uuid == null) ? "unknown" : uuid.toString();
             LedgerRuntime.onJoin(client.runDirectory, id);
+            Thread poll = new Thread(() -> {
+                if (!ServerGate.active()) {
+                    return;
+                }
+                MarketRefreshCoordinator.SHARED.onJoinPoll();
+                StockSnapshot snap = SnapshotStore.SHARED.get();
+                DegradePolicy policy = DegradePolicy.of(snap, CommandGateway.SHARED);
+                BcStockLog.info("降级：{}", policy);
+                BcStockLog.info("快照打印：公司 {} 家 / 持仓 {} / 余额 {} / 降级 {}",
+                        snap.companies().size(),
+                        snap.holdingsKnown() ? snap.holdingsOrEmpty().size() + " 家" : "未知",
+                        snap.wallet().known() ? snap.wallet().balance() : "未知",
+                        policy);
+            }, "bcstock-api");
+            poll.setDaemon(true);
+            poll.start();
+            BcStockLog.info("已连目标服 {}，BC Stock 启用", address);
         });
-        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> LedgerRuntime.onDisconnect());
-        BcStockLog.info("账本：进服后按 UUID 打开 bcstock/<uuid>/store");
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+            ServerGate.clear();
+            LedgerRuntime.onDisconnect();
+        });
+        BcStockLog.info("账本：仅目标服进服后按 UUID 打开 bcstock/<uuid>/store");
     }
 
     /**

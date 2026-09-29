@@ -1,6 +1,7 @@
 package cn.myflycat.bcstock.mixin;
 
 import cn.myflycat.bcstock.BcStockLog;
+import cn.myflycat.bcstock.ServerGate;
 import cn.myflycat.bcstock.data.CommandGateway;
 import cn.myflycat.bcstock.probe.InvestProbe;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
@@ -25,7 +26,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * （典型场景是 M1 的 GUI 覆盖层要去改渲染调用）。这里要的是「方法体跑完后加一句话」，
  * 没有可包装的调用点、也没有要改写的返回值——{@code @Inject(at = TAIL)} 就是这件事的标准工具，
  * 硬套 {@code @WrapOperation} 只会把简单事情写复杂。
- * MixinExtras（Loom 1.17.21 自带 <b>0.5.5</b>，不是早期设计里记的 0.5.0-rc.2）仍在编译期与产物里，
+ * MixinExtras（Loom 1.17.21 自带 <b>0.5.5</b>，不是 PLAN.md 里记的 0.5.0-rc.2）仍在编译期与产物里，
  * M1 需要时直接用。
  *
  * <h2>线程</h2>
@@ -35,7 +36,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *
  * <h2>只读</h2>
  * 这里只读 {@code packet.getSyncId()} 与 {@code packet.getSlot()} 两个数字，不碰 ItemStack，
- * 更不发任何点击。执行层（已定本期不做）才会碰 {@code handleInventoryMouseClick}。
+ * 更不发任何点击。执行层（M4，PLAN.md §5 已定本期不做）才会碰 {@code handleInventoryMouseClick}。
  */
 @Mixin(ClientPlayNetworkHandler.class)
 public abstract class ClientPlayNetworkHandlerMixin {
@@ -54,6 +55,9 @@ public abstract class ClientPlayNetworkHandlerMixin {
      */
     @Inject(method = "onScreenHandlerSlotUpdate", at = @At("TAIL"))
     private void bcstock$onSlotUpdate(ScreenHandlerSlotUpdateS2CPacket packet, CallbackInfo ci) {
+        if (!ServerGate.active()) {
+            return;
+        }
         InvestProbe.onSlotPacket(packet.getSyncId(), packet.getSlot());
     }
 
@@ -74,6 +78,9 @@ public abstract class ClientPlayNetworkHandlerMixin {
      */
     @Inject(method = "onInventory", at = @At("TAIL"))
     private void bcstock$onInventoryContents(InventoryS2CPacket packet, CallbackInfo ci) {
+        if (!ServerGate.active()) {
+            return;
+        }
         InvestProbe.onInventoryContents(packet.syncId());
     }
 
@@ -88,6 +95,9 @@ public abstract class ClientPlayNetworkHandlerMixin {
      */
     @Inject(method = "onGameMessage", at = @At("TAIL"))
     private void bcstock$onGameMessage(GameMessageS2CPacket packet, CallbackInfo ci) {
+        if (!ServerGate.active()) {
+            return;
+        }
         try {
             CommandGateway.SHARED.onChatLine(packet.content().getString());
         } catch (Throwable t) {

@@ -1,6 +1,7 @@
 package cn.myflycat.bcstock.probe;
 
 import cn.myflycat.bcstock.BcStockLog;
+import cn.myflycat.bcstock.ServerGate;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
@@ -14,7 +15,7 @@ import org.lwjgl.glfw.GLFW;
  *
  * <p>单独成类的理由：{@link InvestProbe} 是<b>纯逻辑</b>（不依赖任何事件 API，只吃
  * {@code Screen} / {@code ScreenHandler} / tick），这样 M3 之后就能拿它离线跑回归对照
- * （「黄金样本」测试策略）。事件注册这种 glue code 留在这里，
+ * （PLAN.md §1 的「黄金样本」测试策略）。事件注册这种 glue code 留在这里，
  * 以后换事件源（比如 M1 改成渲染钩子）不用动探测逻辑。
  *
  * <p>M0 只注册三样东西，全是只读的：
@@ -36,8 +37,12 @@ public final class InvestProbeBootstrap {
 
     /** 在 {@code onInitializeClient} 里调一次。重复调用是安全的（事件总线会去重，热键会覆盖）。 */
     public static void register() {
-        ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) ->
-                InvestProbe.onScreenOpened(screen, "AFTER_INIT"));
+        ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
+            if (!ServerGate.active()) {
+                return;
+            }
+            InvestProbe.onScreenOpened(screen, "AFTER_INIT");
+        });
 
         ClientTickEvents.END_CLIENT_TICK.register(InvestProbeBootstrap::onEndTick);
 
@@ -62,6 +67,14 @@ public final class InvestProbeBootstrap {
      * 把计数累加，循环能全部吃掉，避免残留的按下次数在下一 tick 触发一次莫名其妙的 dump。
      */
     private static void onEndTick(MinecraftClient client) {
+        if (!ServerGate.active()) {
+            if (probeKey != null) {
+                while (probeKey.wasPressed()) {
+                    // 吃掉按键，非目标服不 dump
+                }
+            }
+            return;
+        }
         if (probeKey != null) {
             while (probeKey.wasPressed()) {
                 InvestProbe.probeNow(client);

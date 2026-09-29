@@ -1,6 +1,7 @@
 package cn.myflycat.bcstock.ui;
 
 import cn.myflycat.bcstock.BcStockLog;
+import cn.myflycat.bcstock.ServerGate;
 import cn.myflycat.bcstock.data.BcStockSettings;
 import cn.myflycat.bcstock.data.CompanyView;
 import cn.myflycat.bcstock.data.FloorCache;
@@ -60,6 +61,9 @@ public final class StockHud {
                 return;
             }
             while (hudKey.wasPressed()) {
+                if (!ServerGate.active()) {
+                    continue;
+                }
                 visible = !visible;
             }
         });
@@ -74,9 +78,9 @@ public final class StockHud {
         visible = value;
     }
 
-    /** HUD 回调。只读快照，不往服务器发任何东西。 */
+    /** HUD 回调。只读快照，不往服务器发任何东西。非目标服不画。 */
     public static void render(DrawContext graphics, RenderTickCounter tickCounter) {
-        if (!visible || graphics == null) {
+        if (!ServerGate.active() || !visible || graphics == null) {
             return;
         }
         MinecraftClient client = MinecraftClient.getInstance();
