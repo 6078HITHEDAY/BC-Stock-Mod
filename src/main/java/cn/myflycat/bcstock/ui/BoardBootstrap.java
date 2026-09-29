@@ -9,6 +9,8 @@ import cn.myflycat.bcstock.data.SnapshotStore;
 import java.time.Instant;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import org.lwjgl.glfw.GLFW;
@@ -48,12 +50,14 @@ public final class BoardBootstrap {
                     }
                 }
             }
-            // 盘面开着时续发被单飞挡住的那条；冷却期内会静默拒绝。
-            if (ServerGate.active() && client.currentScreen instanceof StockBoardScreen) {
-                BoardOpenPull.tickWhileOpen(CommandGateway.SHARED);
-            }
+            // 门禁关（断线 / 非目标服）：关掉已打开的盘面与子屏。
             if (!ServerGate.active()) {
+                dismissStockScreens(client);
                 return;
+            }
+            // 盘面开着时续发被单飞挡住的那条；冷却期内会静默拒绝。
+            if (client.currentScreen instanceof StockBoardScreen) {
+                BoardOpenPull.tickWhileOpen(CommandGateway.SHARED);
             }
             String holdingsTrigger = CollectScheduler.SHARED.pendingCollectTag() ? "collect" : null;
             BoardOpenPull.drainToStore(CommandGateway.SHARED, SnapshotStore.SHARED, Instant.now(),
@@ -61,5 +65,21 @@ public final class BoardBootstrap {
         });
         BcStockLog.info("盘面热键已注册：{}（默认 K）。调试栅格默认关，开用 -D{}", KEY_TRANSLATION,
                 UiPalette.DEBUG_GRID_PROPERTY);
+    }
+
+    /**
+     * 关掉盘面及其子屏（详情 / 数量 / 确认）。门禁关闭或断线时调用。
+     */
+    public static void dismissStockScreens(MinecraftClient client) {
+        if (client == null) {
+            return;
+        }
+        Screen screen = client.currentScreen;
+        if (screen instanceof StockBoardScreen
+                || screen instanceof DetailScreen
+                || screen instanceof QtyDialogScreen
+                || screen instanceof TradeConfirmScreen) {
+            client.setScreen(null);
+        }
     }
 }

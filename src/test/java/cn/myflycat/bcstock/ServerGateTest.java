@@ -51,4 +51,16 @@ class ServerGateTest {
         ServerGate.clear();
         assertFalse(ServerGate.active());
     }
+
+    @Test
+    @DisplayName("代数：启用 / 关闭都会递增，断线后 isCurrent 失败")
+    void generationInvalidatesInFlight() {
+        long gen = ServerGate.activate();
+        assertTrue(ServerGate.isCurrent(gen));
+        ServerGate.clear();
+        assertFalse(ServerGate.isCurrent(gen));
+        long gen2 = ServerGate.activate();
+        assertFalse(ServerGate.isCurrent(gen));
+        assertTrue(ServerGate.isCurrent(gen2));
+    }
 }

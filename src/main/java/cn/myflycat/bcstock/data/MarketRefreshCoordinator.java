@@ -1,6 +1,7 @@
 package cn.myflycat.bcstock.data;
 
 import cn.myflycat.bcstock.BcStockLog;
+import cn.myflycat.bcstock.ServerGate;
 import java.io.File;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -116,10 +117,18 @@ public final class MarketRefreshCoordinator {
      * 进服全量。调用方应在后台线程（HTTP 可能数秒）。
      */
     public void onJoinPoll() {
+        onJoinPoll(null);
+    }
+
+    /**
+     * @param stillValid 非空时：HTTP 落盘前再验（典型：{@code () -> ServerGate.isCurrent(gen)}）。
+     *                   断线后丢弃结果，不写共享快照。
+     */
+    public void onJoinPoll(BooleanSupplier stillValid) {
         joinAttempted = true;
         lastApiAttemptMs = clock.getAsLong();
-        boolean ok = runApiPoll(true);
-        if (ok) {
+        boolean ok = runApiPoll(true, stillValid);
+        if (ok && (stillValid == null || stillValid.getAsBoolean())) {
             markSuccess(false);
         }
     }
@@ -186,26 +195,34 @@ public final class MarketRefreshCoordinator {
         lastApiAttemptMs = clock.getAsLong();
         BcStockLog.info("行情：API 兜底（{}）", why);
         if (apiPollForTest != null) {
-            boolean ok = runApiPoll(false);
+            boolean ok = runApiPoll(false, null);
             if (ok) {
                 markSuccess(true);
             }
             return;
         }
         apiInFlight = true;
+        // 落盘前再看门禁：断线后不写共享快照。
         poller.pollOnceAsync(ok -> {
             apiInFlight = false;
             if (ok) {
                 markSuccess(true);
             }
-        });
+        }, ServerGate::active);
     }
 
     private boolean runApiPoll(boolean join) {
+        return runApiPoll(join, null);
+    }
+
+    private boolean runApiPoll(boolean join, BooleanSupplier stillValid) {
         if (apiPollForTest != null) {
+            if (stillValid != null && !stillValid.getAsBoolean()) {
+                return false;
+            }
             return apiPollForTest.getAsBoolean();
         }
-        ApiClient.Result result = poller.pollOnce(join ? Long.MIN_VALUE : clock.getAsLong());
+        ApiClient.Result result = poller.pollOnce(join ? Long.MIN_VALUE : clock.getAsLong(), stillValid);
         return result != null && result.ok();
     }
 

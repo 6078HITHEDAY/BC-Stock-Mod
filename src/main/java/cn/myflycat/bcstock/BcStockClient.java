@@ -181,11 +181,12 @@ public final class BcStockClient implements ClientModInitializer {
             String address = (info == null) ? null : info.address;
             if (!ServerGate.matches(address)) {
                 ServerGate.clear();
+                dismissStockUi(client);
                 BcStockLog.info("非目标服（{}），BC Stock 保持关闭",
                         address == null ? "单机/无地址" : address);
                 return;
             }
-            ServerGate.setActive(true);
+            long sessionGen = ServerGate.activate();
             UUID uuid = null;
             if (client.player != null) {
                 uuid = client.player.getUuid();
@@ -196,10 +197,14 @@ public final class BcStockClient implements ClientModInitializer {
             String id = (uuid == null) ? "unknown" : uuid.toString();
             LedgerRuntime.onJoin(client.runDirectory, id);
             Thread poll = new Thread(() -> {
-                if (!ServerGate.active()) {
+                if (!ServerGate.isCurrent(sessionGen)) {
                     return;
                 }
-                MarketRefreshCoordinator.SHARED.onJoinPoll();
+                MarketRefreshCoordinator.SHARED.onJoinPoll(() -> ServerGate.isCurrent(sessionGen));
+                if (!ServerGate.isCurrent(sessionGen)) {
+                    BcStockLog.info("进服 API 结果未采用（断线/换服）");
+                    return;
+                }
                 StockSnapshot snap = SnapshotStore.SHARED.get();
                 DegradePolicy policy = DegradePolicy.of(snap, CommandGateway.SHARED);
                 BcStockLog.info("降级：{}", policy);
@@ -216,8 +221,15 @@ public final class BcStockClient implements ClientModInitializer {
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             ServerGate.clear();
             LedgerRuntime.onDisconnect();
+            // DISCONNECT 可能不在主线程；关盘面丢回主线程。
+            client.execute(() -> dismissStockUi(client));
         });
         BcStockLog.info("账本：仅目标服进服后按 UUID 打开 bcstock/<uuid>/store");
+    }
+
+    /** 门禁关闭时关掉盘面及其子屏，避免断线后还挂着行情 UI。 */
+    private static void dismissStockUi(MinecraftClient client) {
+        BoardBootstrap.dismissStockScreens(client);
     }
 
     /**

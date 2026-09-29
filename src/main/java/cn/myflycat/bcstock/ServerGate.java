@@ -1,11 +1,15 @@
 package cn.myflycat.bcstock;
 
+import java.util.concurrent.atomic.AtomicLong;
+
 /**
  * 只在帕拉伦股市服（{@code mc.bilicraft.com:25577}）打开副作用。
  *
  * <p>不依赖 {@code net.minecraft}，地址匹配可离线测。
  * 用玩家填写的服务器地址判断，不看 DNS 解析后的 IP。
  * 单机（无 {@code ServerInfo}）与其他服一律关闭。
+ *
+ * <p>{@link #generation()} 在启用 / 关闭时都会递增，用来作废断线后仍在飞的进服 API 线程。
  */
 public final class ServerGate {
 
@@ -15,6 +19,7 @@ public final class ServerGate {
     public static final int VANILLA_DEFAULT_PORT = 25565;
 
     private static volatile boolean active;
+    private static final AtomicLong GENERATION = new AtomicLong();
 
     private ServerGate() {
     }
@@ -23,12 +28,39 @@ public final class ServerGate {
         return active;
     }
 
+    /** 当前会话代数。进服 API 线程应捕获并在落盘前用 {@link #isCurrent} 再验。 */
+    public static long generation() {
+        return GENERATION.get();
+    }
+
+    /** {@code active} 且代数未变（未断线、未换服）。 */
+    public static boolean isCurrent(long sessionGeneration) {
+        return active && GENERATION.get() == sessionGeneration;
+    }
+
+    /**
+     * 启用并换新代数。
+     *
+     * @return 本会话代数，交给后台线程做 {@link #isCurrent} 校验
+     */
+    public static long activate() {
+        long gen = GENERATION.incrementAndGet();
+        active = true;
+        return gen;
+    }
+
+    /** 测试用；生产路径用 {@link #activate()} / {@link #clear()}。 */
     public static void setActive(boolean value) {
-        active = value;
+        if (value) {
+            activate();
+        } else {
+            clear();
+        }
     }
 
     public static void clear() {
         active = false;
+        GENERATION.incrementAndGet();
     }
 
     /**
