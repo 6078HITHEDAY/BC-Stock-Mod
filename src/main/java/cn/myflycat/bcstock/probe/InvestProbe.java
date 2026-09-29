@@ -102,7 +102,7 @@ public final class InvestProbe {
 
         if (kind == StockContainerKind.UNKNOWN) {
             // 不 dump：玩家自己的背包界面也是 HandledScreen，里面是个人装备，
-            // 不该进日志（data/gui/ 的旧日志就是被背包撑长的）。想看得手动按键。
+            // 不该进日志（旧采集日志就是被背包撑长的）。想看得手动按键。
             stopWatching("非股市容器，默认不 dump（可在游戏内按探测键强制 dump）");
             return;
         }

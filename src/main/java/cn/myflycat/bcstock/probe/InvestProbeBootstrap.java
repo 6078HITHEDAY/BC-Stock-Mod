@@ -15,7 +15,7 @@ import org.lwjgl.glfw.GLFW;
  *
  * <p>单独成类的理由：{@link InvestProbe} 是<b>纯逻辑</b>（不依赖任何事件 API，只吃
  * {@code Screen} / {@code ScreenHandler} / tick），这样 M3 之后就能拿它离线跑回归对照
- * （PLAN.md §1 的「黄金样本」测试策略）。事件注册这种 glue code 留在这里，
+ * （「黄金样本」测试策略）。事件注册这种 glue code 留在这里，
  * 以后换事件源（比如 M1 改成渲染钩子）不用动探测逻辑。
  *
  * <p>M0 只注册三样东西，全是只读的：

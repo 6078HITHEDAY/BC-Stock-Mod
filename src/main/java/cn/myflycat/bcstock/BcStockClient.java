@@ -38,7 +38,7 @@ import net.minecraft.client.network.ServerInfo;
  * <p>纯客户端 mod（{@code fabric.mod.json} 里 {@code environment = "client"}），
  * 服务端一行都不用改，也不该改。
  *
- * <p>三层的包结构已经按 PLAN.md §2 预留好，M0 只有 {@code probe} 包是实的：
+ * <p>三层的包结构已经预留好，M0 只有 {@code probe} 包是实的：
  * <ul>
  *   <li>{@code ui} —— 展示层（HUD / GUI 覆盖层 / 独立面板）</li>
  *   <li>{@code decision} —— 决策层（BCquant 地板模型移植，纯数学，可离线测）</li>
@@ -181,12 +181,11 @@ public final class BcStockClient implements ClientModInitializer {
             String address = (info == null) ? null : info.address;
             if (!ServerGate.matches(address)) {
                 ServerGate.clear();
-                dismissStockUi(client);
                 BcStockLog.info("非目标服（{}），BC Stock 保持关闭",
                         address == null ? "单机/无地址" : address);
                 return;
             }
-            long sessionGen = ServerGate.activate();
+            ServerGate.setActive(true);
             UUID uuid = null;
             if (client.player != null) {
                 uuid = client.player.getUuid();
@@ -197,14 +196,10 @@ public final class BcStockClient implements ClientModInitializer {
             String id = (uuid == null) ? "unknown" : uuid.toString();
             LedgerRuntime.onJoin(client.runDirectory, id);
             Thread poll = new Thread(() -> {
-                if (!ServerGate.isCurrent(sessionGen)) {
+                if (!ServerGate.active()) {
                     return;
                 }
-                MarketRefreshCoordinator.SHARED.onJoinPoll(() -> ServerGate.isCurrent(sessionGen));
-                if (!ServerGate.isCurrent(sessionGen)) {
-                    BcStockLog.info("进服 API 结果未采用（断线/换服）");
-                    return;
-                }
+                MarketRefreshCoordinator.SHARED.onJoinPoll();
                 StockSnapshot snap = SnapshotStore.SHARED.get();
                 DegradePolicy policy = DegradePolicy.of(snap, CommandGateway.SHARED);
                 BcStockLog.info("降级：{}", policy);
@@ -221,15 +216,8 @@ public final class BcStockClient implements ClientModInitializer {
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             ServerGate.clear();
             LedgerRuntime.onDisconnect();
-            // DISCONNECT 可能不在主线程；关盘面丢回主线程。
-            client.execute(() -> dismissStockUi(client));
         });
         BcStockLog.info("账本：仅目标服进服后按 UUID 打开 bcstock/<uuid>/store");
-    }
-
-    /** 门禁关闭时关掉盘面及其子屏，避免断线后还挂着行情 UI。 */
-    private static void dismissStockUi(MinecraftClient client) {
-        BoardBootstrap.dismissStockScreens(client);
     }
 
     /**
