@@ -1,5 +1,6 @@
 package cn.myflycat.bcstock.ui;
 
+import cn.myflycat.bcstock.ServerGate;
 import cn.myflycat.bcstock.data.BcStockSettings;
 import cn.myflycat.bcstock.data.FloorCache;
 import cn.myflycat.bcstock.data.MarketRefreshCoordinator;
@@ -21,7 +22,7 @@ public final class AlertBootstrap {
 
     public static void register() {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (!BcStockSettings.alertEnabled()) {
+            if (!ServerGate.active() || !BcStockSettings.alertEnabled()) {
                 return;
             }
             long generation = MarketRefreshCoordinator.SHARED.generation();

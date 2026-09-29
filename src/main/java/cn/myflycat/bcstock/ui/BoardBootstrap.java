@@ -1,6 +1,7 @@
 package cn.myflycat.bcstock.ui;
 
 import cn.myflycat.bcstock.BcStockLog;
+import cn.myflycat.bcstock.ServerGate;
 import cn.myflycat.bcstock.data.BoardOpenPull;
 import cn.myflycat.bcstock.data.CollectScheduler;
 import cn.myflycat.bcstock.data.CommandGateway;
@@ -36,6 +37,9 @@ public final class BoardBootstrap {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (boardKey != null) {
                 while (boardKey.wasPressed()) {
+                    if (!ServerGate.active()) {
+                        continue;
+                    }
                     if (client.currentScreen instanceof StockBoardScreen) {
                         client.setScreen(null);
                     } else {
@@ -45,8 +49,11 @@ public final class BoardBootstrap {
                 }
             }
             // 盘面开着时续发被单飞挡住的那条；冷却期内会静默拒绝。
-            if (client.currentScreen instanceof StockBoardScreen) {
+            if (ServerGate.active() && client.currentScreen instanceof StockBoardScreen) {
                 BoardOpenPull.tickWhileOpen(CommandGateway.SHARED);
+            }
+            if (!ServerGate.active()) {
+                return;
             }
             String holdingsTrigger = CollectScheduler.SHARED.pendingCollectTag() ? "collect" : null;
             BoardOpenPull.drainToStore(CommandGateway.SHARED, SnapshotStore.SHARED, Instant.now(),

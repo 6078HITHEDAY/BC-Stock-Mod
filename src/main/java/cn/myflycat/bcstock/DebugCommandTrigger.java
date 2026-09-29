@@ -44,6 +44,9 @@ public final class DebugCommandTrigger {
             }
             // Yarn 名 wasPressed = 官方文档 consumeClick
             while (debugKey.wasPressed()) {
+                if (!ServerGate.active()) {
+                    continue;
+                }
                 fireOnce();
             }
         });
