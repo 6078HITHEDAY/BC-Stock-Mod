@@ -1,5 +1,9 @@
 plugins {
     id("fabric-loom") version "1.17.21"
+    // 代码格式化：本地 `./gradlew spotlessApply`，`./gradlew check`（含 build）会跑 spotlessCheck。
+    // 格式化只在私有仓做，Copybara 不做格式化（copy.bara.sky 里没有执行外部命令的 transform）。
+    // 本文件随公开子集导出，公开仓因此用同一份格式规则。见 docs/copybara.md §代码格式化。
+    id("com.diffplug.spotless") version "8.10.4"
 }
 
 val archives_base_name: String by project
@@ -57,4 +61,18 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+}
+
+spotless {
+    java {
+        target("src/**/*.java")
+        // Google 风格：2 空格缩进、100 列。只覆盖 src/ 下的 Java；
+        // docs/、data/、copy.bara.sky 不参与，避免把文档与同步配置的 diff 搅进来。
+        googleJavaFormat()
+        removeUnusedImports()
+        trimTrailingWhitespace()
+        endWithNewline()
+    }
+    // 版本锁死：规则升级要单独一个提交，别让某次构建悄悄改格式。
+    isEnforceCheck = true
 }

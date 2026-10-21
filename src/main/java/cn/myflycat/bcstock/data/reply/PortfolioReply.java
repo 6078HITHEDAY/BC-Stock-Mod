@@ -2,7 +2,6 @@ package cn.myflycat.bcstock.data.reply;
 
 import cn.myflycat.bcstock.data.CompanyView;
 import cn.myflycat.bcstock.data.HoldingView;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -11,6 +10,7 @@ import java.util.regex.Pattern;
 
 /**
  * {@code /invest portfolio} 回执。实测块（2026-09-26）：
+ *
  * <pre>
  * -=-=-=-=-=-=-=-=-=-= [帕拉伦股市] =-=-=-=-=-=-=-=-=-=-
  * 月港控股
@@ -22,105 +22,104 @@ import java.util.regex.Pattern;
  * -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
  * </pre>
  *
- * <p>聊天回执<b>没有</b> {@code companyId}、没有平均买入价。
- * {@code marketId} 填 {@link CompanyView#ID_UNKNOWN}，均价填 {@code NaN}
- * （这条回执里就没有这个字段，不是「均价是 0」——GUI 叠上来才会有成本）。
+ * <p>聊天回执<b>没有</b> {@code companyId}、没有平均买入价。 {@code marketId} 填 {@link CompanyView#ID_UNKNOWN}，均价填
+ * {@code NaN} （这条回执里就没有这个字段，不是「均价是 0」——GUI 叠上来才会有成本）。
  *
- * <p>空仓：整个块里没有任何公司 → 返回空列表（「确认没有持仓」），
- * 不是 {@code empty}（那表示解析失败 / 超时）。
+ * <p>空仓：整个块里没有任何公司 → 返回空列表（「确认没有持仓」）， 不是 {@code empty}（那表示解析失败 / 超时）。
  */
 public final class PortfolioReply {
 
-    private static final Pattern SHARES = Pattern.compile("股票:\\s*(\\d+)");
-    /** 总价值可能有千分位逗号与 K/M/B 单位（大额持仓），不只裸小数。 */
-    private static final Pattern TOTAL = Pattern.compile("总价值:\\s*([\\d,]+(?:\\.\\d+)?)\\s*([KMB])?");
+  private static final Pattern SHARES = Pattern.compile("股票:\\s*(\\d+)");
 
-    private PortfolioReply() {
+  /** 总价值可能有千分位逗号与 K/M/B 单位（大额持仓），不只裸小数。 */
+  private static final Pattern TOTAL = Pattern.compile("总价值:\\s*([\\d,]+(?:\\.\\d+)?)\\s*([KMB])?");
+
+  private PortfolioReply() {}
+
+  /**
+   * @return 解析成功（含确认空仓）→ 列表；错误前缀或完全对不上 → empty
+   */
+  public static Optional<List<HoldingView>> parse(List<String> lines) {
+    if (lines == null || lines.isEmpty()) {
+      return Optional.empty();
+    }
+    List<String> normalized = ReplyText.normalizeAll(lines);
+    for (String line : normalized) {
+      if (ReplyText.isNoHoldingsMessage(line)) {
+        // 真机空仓不发块，只回这一句
+        return Optional.of(List.of());
+      }
+      if (ReplyText.isError(line)) {
+        return Optional.empty();
+      }
+    }
+    boolean sawBlock = false;
+    for (String line : normalized) {
+      if (ReplyText.isBlockStart(line)) {
+        sawBlock = true;
+        break;
+      }
+    }
+    if (!sawBlock) {
+      return Optional.empty();
     }
 
-    /**
-     * @return 解析成功（含确认空仓）→ 列表；错误前缀或完全对不上 → empty
-     */
-    public static Optional<List<HoldingView>> parse(List<String> lines) {
-        if (lines == null || lines.isEmpty()) {
-            return Optional.empty();
-        }
-        List<String> normalized = ReplyText.normalizeAll(lines);
-        for (String line : normalized) {
-            if (ReplyText.isNoHoldingsMessage(line)) {
-                // 真机空仓不发块，只回这一句
-                return Optional.of(List.of());
-            }
-            if (ReplyText.isError(line)) {
-                return Optional.empty();
-            }
-        }
-        boolean sawBlock = false;
-        for (String line : normalized) {
-            if (ReplyText.isBlockStart(line)) {
-                sawBlock = true;
-                break;
-            }
-        }
-        if (!sawBlock) {
-            return Optional.empty();
-        }
+    List<HoldingView> holdings = new ArrayList<>();
+    String name = null;
+    Long shares = null;
+    Double value = null;
 
-        List<HoldingView> holdings = new ArrayList<>();
-        String name = null;
-        Long shares = null;
-        Double value = null;
-
-        for (String line : normalized) {
-            if (line.isEmpty() || ReplyText.isBlockStart(line) || ReplyText.isBlockEnd(line)) {
-                continue;
-            }
-            if (line.startsWith("[") && line.endsWith("]")) {
-                continue;
-            }
-            if (line.startsWith("股票:")) {
-                Matcher shareMatch = SHARES.matcher(line);
-                if (shareMatch.find()) {
-                    shares = parseLong(shareMatch.group(1));
-                }
-                continue;
-            }
-            Matcher totalMatch = TOTAL.matcher(line);
-            if (line.startsWith("总价值:") && totalMatch.find()) {
-                value = ReplyText.parsePlainNumber(totalMatch.group(1));
-                if (!Double.isNaN(value)) {
-                    String unit = totalMatch.group(2);
-                    if ("K".equalsIgnoreCase(unit)) {
-                        value *= 1_000.0;
-                    } else if ("M".equalsIgnoreCase(unit)) {
-                        value *= 1_000_000.0;
-                    } else if ("B".equalsIgnoreCase(unit)) {
-                        value *= 1_000_000_000.0;
-                    }
-                }
-                if (name != null && shares != null && value != null && !Double.isNaN(value)) {
-                    holdings.add(new HoldingView(
-                            name, CompanyView.ID_UNKNOWN, "", shares, value, Double.NaN));
-                }
-                name = null;
-                shares = null;
-                value = null;
-                continue;
-            }
-            if (!line.startsWith("股票:") && !line.startsWith("总价值:")
-                    && !line.contains("帕拉伦股市")
-                    && !ReplyText.isNoiseLine(line)) {
-                name = line;
-            }
+    for (String line : normalized) {
+      if (line.isEmpty() || ReplyText.isBlockStart(line) || ReplyText.isBlockEnd(line)) {
+        continue;
+      }
+      if (line.startsWith("[") && line.endsWith("]")) {
+        continue;
+      }
+      if (line.startsWith("股票:")) {
+        Matcher shareMatch = SHARES.matcher(line);
+        if (shareMatch.find()) {
+          shares = parseLong(shareMatch.group(1));
         }
-        return Optional.of(List.copyOf(holdings));
+        continue;
+      }
+      Matcher totalMatch = TOTAL.matcher(line);
+      if (line.startsWith("总价值:") && totalMatch.find()) {
+        value = ReplyText.parsePlainNumber(totalMatch.group(1));
+        if (!Double.isNaN(value)) {
+          String unit = totalMatch.group(2);
+          if ("K".equalsIgnoreCase(unit)) {
+            value *= 1_000.0;
+          } else if ("M".equalsIgnoreCase(unit)) {
+            value *= 1_000_000.0;
+          } else if ("B".equalsIgnoreCase(unit)) {
+            value *= 1_000_000_000.0;
+          }
+        }
+        if (name != null && shares != null && value != null && !Double.isNaN(value)) {
+          holdings.add(
+              new HoldingView(name, CompanyView.ID_UNKNOWN, "", shares, value, Double.NaN));
+        }
+        name = null;
+        shares = null;
+        value = null;
+        continue;
+      }
+      if (!line.startsWith("股票:")
+          && !line.startsWith("总价值:")
+          && !line.contains("帕拉伦股市")
+          && !ReplyText.isNoiseLine(line)) {
+        name = line;
+      }
     }
+    return Optional.of(List.copyOf(holdings));
+  }
 
-    private static Long parseLong(String raw) {
-        try {
-            return Long.parseLong(raw);
-        } catch (NumberFormatException e) {
-            return null;
-        }
+  private static Long parseLong(String raw) {
+    try {
+      return Long.parseLong(raw);
+    } catch (NumberFormatException e) {
+      return null;
     }
+  }
 }

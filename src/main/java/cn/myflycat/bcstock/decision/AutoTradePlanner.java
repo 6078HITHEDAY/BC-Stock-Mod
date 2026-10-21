@@ -12,194 +12,206 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/**
- * 行情刷新后最多交出一笔自动单意图。纯函数，不发命令。
- */
+/** 行情刷新后最多交出一笔自动单意图。纯函数，不发命令。 */
 public final class AutoTradePlanner {
 
-    public record Limits(
-            AutoTradeSettings.Mode mode,
-            boolean allowBuy,
-            boolean allowSell,
-            int maxPerTrade,
-            int maxPerDay,
-            int filledToday,
-            long cooldownMs,
-            long lastAutoAtMs,
-            double cashFloor,
-            List<String> whitelist) {
+  public record Limits(
+      AutoTradeSettings.Mode mode,
+      boolean allowBuy,
+      boolean allowSell,
+      int maxPerTrade,
+      int maxPerDay,
+      int filledToday,
+      long cooldownMs,
+      long lastAutoAtMs,
+      double cashFloor,
+      List<String> whitelist) {
 
-        public Limits {
-            if (mode == null) {
-                mode = AutoTradeSettings.Mode.ADVICE;
-            }
-            if (whitelist == null) {
-                whitelist = List.of();
-            }
-        }
-
-        public static Limits fromSettings(int filledToday, long lastAutoAtMs) {
-            return new Limits(
-                    AutoTradeSettings.mode(),
-                    AutoTradeSettings.allowBuy(),
-                    AutoTradeSettings.allowSell(),
-                    AutoTradeSettings.maxPerTrade(),
-                    AutoTradeSettings.maxPerDay(),
-                    filledToday,
-                    AutoTradeSettings.cooldownMs(),
-                    lastAutoAtMs,
-                    AutoTradeSettings.cashFloor(),
-                    AutoTradeSettings.whitelistTokens());
-        }
+    public Limits {
+      if (mode == null) {
+        mode = AutoTradeSettings.Mode.ADVICE;
+      }
+      if (whitelist == null) {
+        whitelist = List.of();
+      }
     }
 
-    public record Intent(TradeDraft.Side side, CompanyView company, int qty, String reason) {
+    public static Limits fromSettings(int filledToday, long lastAutoAtMs) {
+      return new Limits(
+          AutoTradeSettings.mode(),
+          AutoTradeSettings.allowBuy(),
+          AutoTradeSettings.allowSell(),
+          AutoTradeSettings.maxPerTrade(),
+          AutoTradeSettings.maxPerDay(),
+          filledToday,
+          AutoTradeSettings.cooldownMs(),
+          lastAutoAtMs,
+          AutoTradeSettings.cashFloor(),
+          AutoTradeSettings.whitelistTokens());
     }
+  }
 
-    private AutoTradePlanner() {
+  public record Intent(TradeDraft.Side side, CompanyView company, int qty, String reason) {}
+
+  private AutoTradePlanner() {}
+
+  public static Optional<Intent> plan(
+      StockSnapshot snap,
+      Map<String, FloorView> floors,
+      DecisionPreset preset,
+      Limits limits,
+      long nowMs) {
+    if (snap == null || limits == null) {
+      return Optional.empty();
     }
-
-    public static Optional<Intent> plan(StockSnapshot snap, Map<String, FloorView> floors,
-                                        DecisionPreset preset, Limits limits, long nowMs) {
-        if (snap == null || limits == null) {
-            return Optional.empty();
-        }
-        if (limits.mode() == AutoTradeSettings.Mode.ADVICE) {
-            return Optional.empty();
-        }
-        if (limits.lastAutoAtMs() > 0 && limits.cooldownMs() > 0
-                && nowMs - limits.lastAutoAtMs() < limits.cooldownMs()) {
-            return Optional.empty();
-        }
-        WalletView wallet = snap.wallet();
-        if (!wallet.known()) {
-            return Optional.empty();
-        }
-        DecisionPreset p = (preset == null) ? DecisionPreset.DEFAULT : preset;
-        Map<String, FloorView> floorMap = (floors == null) ? Map.of() : floors;
-
-        if (limits.allowSell()) {
-            Optional<Intent> sell = firstSell(snap, floorMap, p, limits, wallet);
-            if (sell.isPresent()) {
-                return sell;
-            }
-        }
-        if (limits.allowBuy()) {
-            return firstBuy(snap, floorMap, p, limits, wallet);
-        }
-        return Optional.empty();
+    if (limits.mode() == AutoTradeSettings.Mode.ADVICE) {
+      return Optional.empty();
     }
-
-    private static Optional<Intent> firstSell(StockSnapshot snap, Map<String, FloorView> floors,
-                                              DecisionPreset preset, Limits limits, WalletView wallet) {
-        for (HoldingView h : snap.heldOnly()) {
-            CompanyView company = snap.companyOf(h.name());
-            if (company == null || !company.tradable()) {
-                continue;
-            }
-            if (!whitelisted(company, limits.whitelist())) {
-                continue;
-            }
-            FloorView floor = floors.get(h.name());
-            DecisionEngine.Advice advice = DecisionEngine.advise(company, h, floor, preset);
-            if (advice.side() != DecisionEngine.Side.SELL || advice.qty() < 1) {
-                continue;
-            }
-            int qty = clampQty(advice.qty(), TradeDraft.Side.SELL, company, wallet, limits);
-            if (qty < 1) {
-                continue;
-            }
-            Optional<TradeDraft> draft = TradeDraft.create(company, TradeDraft.Side.SELL, qty, wallet, h);
-            if (draft.isEmpty()) {
-                continue;
-            }
-            return Optional.of(new Intent(TradeDraft.Side.SELL, company, qty, advice.reason()));
-        }
-        return Optional.empty();
+    if (limits.lastAutoAtMs() > 0
+        && limits.cooldownMs() > 0
+        && nowMs - limits.lastAutoAtMs() < limits.cooldownMs()) {
+      return Optional.empty();
     }
-
-    private static Optional<Intent> firstBuy(StockSnapshot snap, Map<String, FloorView> floors,
-                                             DecisionPreset preset, Limits limits, WalletView wallet) {
-        for (CompanyView company : snap.companies()) {
-            if (company == null || !company.tradable()) {
-                continue;
-            }
-            if (!whitelisted(company, limits.whitelist())) {
-                continue;
-            }
-            FloorView floor = floors.get(company.name());
-            HoldingView held = snap.holdingOf(company.name());
-            DecisionEngine.Advice advice = DecisionEngine.advise(company, held, floor, preset);
-            if (advice.side() != DecisionEngine.Side.BUY || advice.qty() < 1) {
-                continue;
-            }
-            int qty = clampQty(advice.qty(), TradeDraft.Side.BUY, company, wallet, limits);
-            if (qty < 1) {
-                continue;
-            }
-            Optional<TradeDraft> draft = TradeDraft.create(company, TradeDraft.Side.BUY, qty, wallet, held);
-            if (draft.isEmpty()) {
-                continue;
-            }
-            return Optional.of(new Intent(TradeDraft.Side.BUY, company, qty, advice.reason()));
-        }
-        return Optional.empty();
+    WalletView wallet = snap.wallet();
+    if (!wallet.known()) {
+      return Optional.empty();
     }
+    DecisionPreset p = (preset == null) ? DecisionPreset.DEFAULT : preset;
+    Map<String, FloorView> floorMap = (floors == null) ? Map.of() : floors;
 
-    static int clampQty(int advised, TradeDraft.Side side, CompanyView company,
-                        WalletView wallet, Limits limits) {
-        if (limits.mode() == AutoTradeSettings.Mode.LIMITED && limits.maxPerTrade() < 1) {
-            // 0 = 禁用该笔交易（2026-10-21 拍板）。想自动单至少 1 股就写 1。
-            return 0;
-        }
-        int qty = advised;
-        if (side == TradeDraft.Side.BUY) {
-            qty = Math.min(qty, TradeSettings.MAX_CUSTOM_QTY);
-            if (limits.mode() == AutoTradeSettings.Mode.LIMITED) {
-                qty = Math.min(qty, limits.maxPerTrade());
-                int remain = limits.maxPerDay() - limits.filledToday();
-                qty = Math.min(qty, Math.max(0, remain));
-            }
-            double price = company.price();
-            if (price > 0 && wallet.known()) {
-                double room = wallet.balance() - limits.cashFloor();
-                int affordable = (int) Math.floor(room / price);
-                qty = Math.min(qty, Math.max(0, affordable));
-            }
-        } else if (limits.mode() == AutoTradeSettings.Mode.LIMITED) {
-            qty = Math.min(qty, limits.maxPerTrade());
-            // 止损卖出绕过单日上限（2026-10-21 拍板）：保护性卖出是风控，不许被日限夹死。
-        }
-        return qty;
+    if (limits.allowSell()) {
+      Optional<Intent> sell = firstSell(snap, floorMap, p, limits, wallet);
+      if (sell.isPresent()) {
+        return sell;
+      }
     }
+    if (limits.allowBuy()) {
+      return firstBuy(snap, floorMap, p, limits, wallet);
+    }
+    return Optional.empty();
+  }
 
-    static boolean whitelisted(CompanyView company, List<String> tokens) {
-        if (tokens == null || tokens.isEmpty()) {
-            return true;
-        }
-        for (String t : tokens) {
-            if (t.equalsIgnoreCase(company.name())) {
-                return true;
-            }
-            if (company.marketIdKnown() && t.equals(Integer.toString(company.marketId()))) {
-                return true;
-            }
-        }
-        return false;
+  private static Optional<Intent> firstSell(
+      StockSnapshot snap,
+      Map<String, FloorView> floors,
+      DecisionPreset preset,
+      Limits limits,
+      WalletView wallet) {
+    for (HoldingView h : snap.heldOnly()) {
+      CompanyView company = snap.companyOf(h.name());
+      if (company == null || !company.tradable()) {
+        continue;
+      }
+      if (!whitelisted(company, limits.whitelist())) {
+        continue;
+      }
+      FloorView floor = floors.get(h.name());
+      DecisionEngine.Advice advice = DecisionEngine.advise(company, h, floor, preset);
+      if (advice.side() != DecisionEngine.Side.SELL || advice.qty() < 1) {
+        continue;
+      }
+      int qty = clampQty(advice.qty(), TradeDraft.Side.SELL, company, wallet, limits);
+      if (qty < 1) {
+        continue;
+      }
+      Optional<TradeDraft> draft = TradeDraft.create(company, TradeDraft.Side.SELL, qty, wallet, h);
+      if (draft.isEmpty()) {
+        continue;
+      }
+      return Optional.of(new Intent(TradeDraft.Side.SELL, company, qty, advice.reason()));
     }
+    return Optional.empty();
+  }
 
-    /**
-     * 实时价下的数量重夹：与 {@link #clampQty} 同一套限额，但余额/现金底线按实时价算
-     * （自动单先查实时价，2026-10-21 拍板）。
-     */
-    public static int clampQtyForLive(TradeDraft.Side side, int advised, CompanyView company,
-                                      WalletView wallet, Limits limits, double livePrice) {
-        int qty = clampQty(advised, side, company, wallet, limits);
-        if (side == TradeDraft.Side.BUY && wallet.known() && livePrice > 0) {
-            double room = wallet.balance() - limits.cashFloor();
-            int affordable = (int) Math.floor(room / livePrice);
-            qty = Math.min(qty, Math.max(0, affordable));
-        }
-        return qty;
+  private static Optional<Intent> firstBuy(
+      StockSnapshot snap,
+      Map<String, FloorView> floors,
+      DecisionPreset preset,
+      Limits limits,
+      WalletView wallet) {
+    for (CompanyView company : snap.companies()) {
+      if (company == null || !company.tradable()) {
+        continue;
+      }
+      if (!whitelisted(company, limits.whitelist())) {
+        continue;
+      }
+      FloorView floor = floors.get(company.name());
+      HoldingView held = snap.holdingOf(company.name());
+      DecisionEngine.Advice advice = DecisionEngine.advise(company, held, floor, preset);
+      if (advice.side() != DecisionEngine.Side.BUY || advice.qty() < 1) {
+        continue;
+      }
+      int qty = clampQty(advice.qty(), TradeDraft.Side.BUY, company, wallet, limits);
+      if (qty < 1) {
+        continue;
+      }
+      Optional<TradeDraft> draft =
+          TradeDraft.create(company, TradeDraft.Side.BUY, qty, wallet, held);
+      if (draft.isEmpty()) {
+        continue;
+      }
+      return Optional.of(new Intent(TradeDraft.Side.BUY, company, qty, advice.reason()));
     }
+    return Optional.empty();
+  }
+
+  static int clampQty(
+      int advised, TradeDraft.Side side, CompanyView company, WalletView wallet, Limits limits) {
+    if (limits.mode() == AutoTradeSettings.Mode.LIMITED && limits.maxPerTrade() < 1) {
+      // 0 = 禁用该笔交易（2026-10-21 拍板）。想自动单至少 1 股就写 1。
+      return 0;
+    }
+    int qty = advised;
+    if (side == TradeDraft.Side.BUY) {
+      qty = Math.min(qty, TradeSettings.MAX_CUSTOM_QTY);
+      if (limits.mode() == AutoTradeSettings.Mode.LIMITED) {
+        qty = Math.min(qty, limits.maxPerTrade());
+        int remain = limits.maxPerDay() - limits.filledToday();
+        qty = Math.min(qty, Math.max(0, remain));
+      }
+      double price = company.price();
+      if (price > 0 && wallet.known()) {
+        double room = wallet.balance() - limits.cashFloor();
+        int affordable = (int) Math.floor(room / price);
+        qty = Math.min(qty, Math.max(0, affordable));
+      }
+    } else if (limits.mode() == AutoTradeSettings.Mode.LIMITED) {
+      qty = Math.min(qty, limits.maxPerTrade());
+      // 止损卖出绕过单日上限（2026-10-21 拍板）：保护性卖出是风控，不许被日限夹死。
+    }
+    return qty;
+  }
+
+  static boolean whitelisted(CompanyView company, List<String> tokens) {
+    if (tokens == null || tokens.isEmpty()) {
+      return true;
+    }
+    for (String t : tokens) {
+      if (t.equalsIgnoreCase(company.name())) {
+        return true;
+      }
+      if (company.marketIdKnown() && t.equals(Integer.toString(company.marketId()))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** 实时价下的数量重夹：与 {@link #clampQty} 同一套限额，但余额/现金底线按实时价算 （自动单先查实时价，2026-10-21 拍板）。 */
+  public static int clampQtyForLive(
+      TradeDraft.Side side,
+      int advised,
+      CompanyView company,
+      WalletView wallet,
+      Limits limits,
+      double livePrice) {
+    int qty = clampQty(advised, side, company, wallet, limits);
+    if (side == TradeDraft.Side.BUY && wallet.known() && livePrice > 0) {
+      double room = wallet.balance() - limits.cashFloor();
+      int affordable = (int) Math.floor(room / livePrice);
+      qty = Math.min(qty, Math.max(0, affordable));
+    }
+    return qty;
+  }
 }
