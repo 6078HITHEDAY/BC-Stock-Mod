@@ -31,7 +31,7 @@ import org.junit.jupiter.api.Test;
  *
  * <h2>样本的来历与口径</h2>
  * {@code src/test/resources/probe-samples/company-list-0201.tsv} 由
- * {@code scripts/gen-probe-fixture.py} 从 {@code data/gui/02-容器1-公司列表-0201.txt}
+ * {@code scripts/gen-probe-fixture.py} 从 MCC 采的「公司列表」槽位快照
  * （MCC 在 2026-09-26 02:01 采的「公司列表」快照）转出。转换只做一件事：把 MCC 缝成一行的
  * {@code 名称 | lore...} 拆回「名字 + 一串 lore 行」，贴合 {@code ItemStack} 的真实结构。
  * <b>不做任何数值解释</b>——单位后缀、箭头正负都原样保留，因为这一版就该原样保留。
@@ -108,7 +108,7 @@ class CompanyListProbeTest {
     @Test
     @DisplayName("与 API 样本交叉核对：帕拉伦联合储蓄 的 GUI 单价 == API latest_price")
     void guiPriceMatchesApiSample() {
-        // data/api/companies.json（2026-09-26 01:51）：帕拉伦联合储蓄 latest_price = 62.97
+        // 公司列表快照（2026-09-26 01:51）：帕拉伦联合储蓄 latest_price = 62.97
         // 这是两条独立数据源（GUI 容器 vs 公开 API）唯一能对上的锚点，值得钉住。
         CompanyRow row = companyAt(loadFixture(), 24);
 

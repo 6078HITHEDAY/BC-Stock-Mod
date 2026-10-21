@@ -38,7 +38,7 @@ import net.minecraft.client.network.ServerInfo;
  * <p>纯客户端 mod（{@code fabric.mod.json} 里 {@code environment = "client"}），
  * 服务端一行都不用改，也不该改。
  *
- * <p>三层的包结构已经按 PLAN.md §2 预留好，M0 只有 {@code probe} 包是实的：
+ * <p>三层的包结构已经预留好，M0 只有 {@code probe} 包是实的：
  * <ul>
  *   <li>{@code ui} —— 展示层（HUD / GUI 覆盖层 / 独立面板）</li>
  *   <li>{@code decision} —— 决策层（BCquant 地板模型移植，纯数学，可离线测）</li>
@@ -196,7 +196,7 @@ public final class BcStockClient implements ClientModInitializer {
             }
             String id = (uuid == null) ? "unknown" : uuid.toString();
             LedgerRuntime.onJoin(client.runDirectory, id);
-            Thread poll = new Thread(() -> {
+            Thread poll = BcStockThreads.daemon("bcstock-api", () -> {
                 if (!ServerGate.isCurrent(sessionGen)) {
                     return;
                 }
@@ -213,14 +213,24 @@ public final class BcStockClient implements ClientModInitializer {
                         snap.holdingsKnown() ? snap.holdingsOrEmpty().size() + " 家" : "未知",
                         snap.wallet().known() ? snap.wallet().balance() : "未知",
                         policy);
-            }, "bcstock-api");
-            poll.setDaemon(true);
+            });
             poll.start();
             BcStockLog.info("已连目标服 {}，BC Stock 启用", address);
         });
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             ServerGate.clear();
+            // 网关排队单 / 对账定时器锚在墙上时钟上，跨断线不清会在重连后
+            // 无确认补发买卖——真钱。必须赶在账本关闭前把排队单标进账本。
+            CommandGateway.SHARED.resetForDisconnect();
             LedgerRuntime.onDisconnect();
+            // 上一会话验证过的 market_id 不许带进下一会话：重连后必须等本轮 API
+            // 现读（快照内存还在，界面数字不消失，只是编号归未知、不能下单）。
+            SnapshotStore.SHARED.wipeIds();
+            // 兜底数据源的会话态同样不复用。
+            cn.myflycat.bcstock.probe.InvestProbe.reset();
+            cn.myflycat.bcstock.ui.LocalAlertBridge.resetSession();
+            cn.myflycat.bcstock.data.MarketDataAge.resetSession();
+            cn.myflycat.bcstock.ui.AlertBootstrap.RULES.resetSession();
             // DISCONNECT 可能不在主线程；关盘面丢回主线程。
             client.execute(() -> dismissStockUi(client));
         });

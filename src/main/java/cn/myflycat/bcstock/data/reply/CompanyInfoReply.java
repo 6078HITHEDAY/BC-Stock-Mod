@@ -96,7 +96,8 @@ public final class CompanyInfoReply {
                     && !line.startsWith("状态:")
                     && !line.startsWith("价格:")
                     && !line.startsWith("风险")
-                    && !line.startsWith("可用股数")) {
+                    && !line.startsWith("可用股数")
+                    && !ReplyText.isNoiseLine(line)) {
                 name = line;
             }
         }

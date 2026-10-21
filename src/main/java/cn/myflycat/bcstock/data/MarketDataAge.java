@@ -28,6 +28,11 @@ public final class MarketDataAge {
         return companiesAtMs > 0L;
     }
 
+    /** 断线 / 测试复位：重连后没有本轮数据就别标「数据 X 分钟前」。 */
+    public static void resetSession() {
+        companiesAtMs = Long.MIN_VALUE;
+    }
+
     /** 测试复位。 */
     public static void resetForTest() {
         companiesAtMs = Long.MIN_VALUE;

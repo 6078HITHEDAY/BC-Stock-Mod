@@ -36,12 +36,13 @@ public final class MarketRefreshCoordinator {
     private BooleanSupplier apiPollForTest;
 
     private volatile long generation;
-    private long lastSuccessMs = Long.MIN_VALUE / 2;
-    private long lastApiAttemptMs = Long.MIN_VALUE / 2;
-    private boolean joinAttempted;
-    private boolean pendingBroadcast;
-    private boolean companiesInFlight;
-    private boolean apiInFlight;
+    // 轮询回调线程写（apiInFlight / joinAttempted / lastApiAttemptMs），主线程 tick 读。
+    private volatile long lastSuccessMs = Long.MIN_VALUE / 2;
+    private volatile long lastApiAttemptMs = Long.MIN_VALUE / 2;
+    private volatile boolean joinAttempted;
+    private volatile boolean pendingBroadcast;
+    private volatile boolean companiesInFlight;
+    private volatile boolean apiInFlight;
 
     public MarketRefreshCoordinator() {
     }

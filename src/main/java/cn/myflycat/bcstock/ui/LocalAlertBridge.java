@@ -22,6 +22,11 @@ public final class LocalAlertBridge {
         return List.copyOf(LAST);
     }
 
+    /** 断线复位：上一会话的提醒不再挂在 HUD 上。 */
+    public static void resetSession() {
+        LAST.clear();
+    }
+
     public static void clearForTest() {
         LAST.clear();
     }

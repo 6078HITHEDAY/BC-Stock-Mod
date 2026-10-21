@@ -7,7 +7,7 @@ package cn.myflycat.bcstock.probe;
  * （官方文档口径见 {@code docs/gui-invest.md}），类型区分不出来，唯一稳定的特征是标题。
  * 用 {@code contains} 而不是 {@code equals}，是因为标题可能带颜色/装饰前缀。
  *
- * <p>三个标题都是 2026-09-26 实测值（{@code data/gui/}），不是推测。
+ * <p>三个标题都是 2026-09-26 实测值（采集快照），不是推测。
  */
 public enum StockContainerKind {
 

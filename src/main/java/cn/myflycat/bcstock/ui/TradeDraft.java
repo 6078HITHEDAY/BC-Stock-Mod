@@ -136,20 +136,27 @@ public record TradeDraft(
         if (!company.priceKnown()) {
             return Optional.empty();
         }
-        if (wallet == null || !wallet.known()) {
-            return Optional.empty();
-        }
         double fill = liveKnown(livePrice) ? livePrice : company.price();
         double est = round2(fill * qty);
-        if (side == Side.BUY && wallet.balance() < est) {
-            return Optional.empty();
+        if (side == Side.BUY) {
+            // 买入要核验余额：余额未知不许下买单（门槛算不了）。
+            if (wallet == null || !wallet.known()) {
+                return Optional.empty();
+            }
+            if (wallet.balance() < est) {
+                return Optional.empty();
+            }
+            return Optional.of(new TradeDraft(
+                    side, company.name(), company.marketId(), company.price(), livePrice, qty,
+                    wallet.balance()));
         }
-        if (side == Side.SELL && (holding == null || holding.shares() < qty)) {
+        // 卖出只受可用股数约束，余额未知不该挡卖（以前会静默关掉弹窗，像下单成功了一样）。
+        if (holding == null || holding.shares() < qty) {
             return Optional.empty();
         }
         return Optional.of(new TradeDraft(
                 side, company.name(), company.marketId(), company.price(), livePrice, qty,
-                wallet.balance()));
+                (wallet != null && wallet.known()) ? wallet.balance() : Double.NaN));
     }
 
     public static String money(double v) {

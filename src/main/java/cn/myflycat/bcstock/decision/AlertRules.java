@@ -47,6 +47,11 @@ public final class AlertRules {
     /** 已报过的 key：{@code generation|kind|company}。generation 是行情刷新世代，不是时钟相位。 */
     private final Set<String> fired = new HashSet<>();
 
+    /** 断线复位：重连后同一告警允许重新报一次。 */
+    public void resetSession() {
+        fired.clear();
+    }
+
     public void clearForTest() {
         fired.clear();
     }

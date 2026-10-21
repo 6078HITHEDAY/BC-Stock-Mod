@@ -108,6 +108,26 @@ public final class ReplyText {
     }
 
     /**
+     * 买卖回执 / 错误提示共有的前缀。回执正文都在这前缀后面。
+     */
+    public static boolean isStockReply(String line) {
+        return normalize(line).startsWith(ERROR_PREFIX);
+    }
+
+    /**
+     * 进退服 / 暂离广播、时间戳行，不能当成公司名 / 持仓名。
+     * 三个块类解析器（companies / portfolio / company info）共用。
+     */
+    public static boolean isNoiseLine(String line) {
+        String n = normalize(line);
+        return n.startsWith("*")
+                || n.contains("加入了游戏")
+                || n.contains("退出了游戏")
+                || n.contains("暂时离开")
+                || n.matches("\\d{1,2}:\\d{2}.*");
+    }
+
+    /**
      * 读 {@code 价格: 1.54 K} / {@code 价格: 42.38}。
      * 单位后缀前有空格；换算后的真实值。读不到返回 {@code NaN}。
      */

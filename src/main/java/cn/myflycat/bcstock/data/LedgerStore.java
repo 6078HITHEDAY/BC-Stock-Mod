@@ -423,82 +423,125 @@ public final class LedgerStore implements AutoCloseable {
     }
 
     private void replaceCompanies(List<CompanyView> companies, long nowMs) {
-        try (Statement st = conn.createStatement()) {
-            st.execute("DELETE FROM companies");
-        } catch (SQLException e) {
-            BcStockLog.warn("清空公司表失败：{}", e.toString());
+        if (!beginTx()) {
             return;
         }
-        if (companies == null || companies.isEmpty()) {
-            return;
-        }
-        String sql = """
-                INSERT INTO companies (name, market_id, api_id, price, price_raw, market_cap,
-                  market_cap_raw, change_pct, total_change_pct, status, risk, available_shares,
-                  source, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """;
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            for (CompanyView c : companies) {
-                if (c == null) {
-                    continue;
-                }
-                ps.setString(1, c.name());
-                ps.setInt(2, c.marketId());
-                ps.setInt(3, c.apiId());
-                setDouble(ps, 4, c.price());
-                ps.setString(5, c.priceRaw());
-                setDouble(ps, 6, c.marketCap());
-                ps.setString(7, c.marketCapRaw());
-                setDouble(ps, 8, c.changePct());
-                setDouble(ps, 9, c.totalChangePct());
-                ps.setString(10, c.status());
-                ps.setInt(11, c.risk());
-                ps.setLong(12, c.availableShares());
-                ps.setString(13, c.source() == null ? CompanyView.Source.API.name() : c.source().name());
-                ps.setLong(14, nowMs);
-                ps.addBatch();
+        try {
+            try (Statement st = conn.createStatement()) {
+                st.execute("DELETE FROM companies");
             }
-            ps.executeBatch();
+            if (companies != null && !companies.isEmpty()) {
+                String sql = """
+                        INSERT INTO companies (name, market_id, api_id, price, price_raw, market_cap,
+                          market_cap_raw, change_pct, total_change_pct, status, risk, available_shares,
+                          source, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """;
+                try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                    for (CompanyView c : companies) {
+                        if (c == null) {
+                            continue;
+                        }
+                        ps.setString(1, c.name());
+                        ps.setInt(2, c.marketId());
+                        ps.setInt(3, c.apiId());
+                        setDouble(ps, 4, c.price());
+                        ps.setString(5, c.priceRaw());
+                        setDouble(ps, 6, c.marketCap());
+                        ps.setString(7, c.marketCapRaw());
+                        setDouble(ps, 8, c.changePct());
+                        setDouble(ps, 9, c.totalChangePct());
+                        ps.setString(10, c.status());
+                        ps.setInt(11, c.risk());
+                        ps.setLong(12, c.availableShares());
+                        ps.setString(13, c.source() == null
+                                ? CompanyView.Source.API.name() : c.source().name());
+                        ps.setLong(14, nowMs);
+                        ps.addBatch();
+                    }
+                    ps.executeBatch();
+                }
+            }
+            conn.commit();
+            putMeta("snapshot_at", Long.toString(nowMs));
         } catch (SQLException e) {
-            BcStockLog.warn("写入公司失败：{}", e.toString());
+            rollbackQuiet();
+            BcStockLog.warn("写入公司失败（已回滚）：{}", e.toString());
+        } finally {
+            endTx();
         }
-        putMeta("snapshot_at", Long.toString(nowMs));
     }
 
     private void replaceHoldings(List<HoldingView> holdings, long nowMs) {
-        try (Statement st = conn.createStatement()) {
-            st.execute("DELETE FROM holdings");
-        } catch (SQLException e) {
-            BcStockLog.warn("清空持仓表失败：{}", e.toString());
+        if (!beginTx()) {
             return;
         }
-        putMeta("holdings_known", "true");
-        if (holdings == null) {
-            return;
-        }
-        String sql = """
-                INSERT INTO holdings (name, market_id, status, shares, current_value,
-                  average_buy_price, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """;
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            for (HoldingView h : holdings) {
-                if (h == null) {
-                    continue;
-                }
-                ps.setString(1, h.name());
-                ps.setInt(2, h.marketId());
-                ps.setString(3, h.status());
-                ps.setLong(4, h.shares());
-                setDouble(ps, 5, h.currentValue());
-                setDouble(ps, 6, h.averageBuyPrice());
-                ps.setLong(7, nowMs);
-                ps.addBatch();
+        try {
+            try (Statement st = conn.createStatement()) {
+                st.execute("DELETE FROM holdings");
             }
-            ps.executeBatch();
+            if (holdings != null && !holdings.isEmpty()) {
+                String sql = """
+                        INSERT INTO holdings (name, market_id, status, shares, current_value,
+                          average_buy_price, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """;
+                try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                    for (HoldingView h : holdings) {
+                        if (h == null) {
+                            continue;
+                        }
+                        ps.setString(1, h.name());
+                        ps.setInt(2, h.marketId());
+                        ps.setString(3, h.status());
+                        ps.setLong(4, h.shares());
+                        setDouble(ps, 5, h.currentValue());
+                        setDouble(ps, 6, h.averageBuyPrice());
+                        ps.setLong(7, nowMs);
+                        ps.addBatch();
+                    }
+                    ps.executeBatch();
+                }
+            }
+            conn.commit();
+            // holdings_known 在 INSERT 成功后再写：半路失败回滚后不能留「已知持仓」的空表。
+            putMeta("holdings_known", "true");
         } catch (SQLException e) {
-            BcStockLog.warn("写入持仓失败：{}", e.toString());
+            rollbackQuiet();
+            BcStockLog.warn("写入持仓失败（已回滚）：{}", e.toString());
+        } finally {
+            endTx();
+        }
+    }
+
+    /** 开事务；失败返回 false（连接已不可用）。 */
+    private boolean beginTx() {
+        if (conn == null) {
+            return false;
+        }
+        try {
+            conn.setAutoCommit(false);
+            return true;
+        } catch (SQLException e) {
+            BcStockLog.warn("开事务失败：{}", e.toString());
+            return false;
+        }
+    }
+
+    private void rollbackQuiet() {
+        try {
+            conn.rollback();
+        } catch (SQLException e) {
+            BcStockLog.warn("回滚失败：{}", e.toString());
+        }
+    }
+
+    /** 恢复自动提交（本类其余路径都按自动提交写）。 */
+    private void endTx() {
+        try {
+            conn.setAutoCommit(true);
+        } catch (SQLException e) {
+            BcStockLog.warn("恢复自动提交失败：{}", e.toString());
         }
     }
 

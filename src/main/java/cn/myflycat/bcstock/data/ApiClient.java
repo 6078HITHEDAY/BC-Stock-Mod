@@ -72,6 +72,8 @@ public final class ApiClient {
     private final String base;
     private final Getter getter;
     private final Duration timeout;
+    /** 注入式构造（测试 seam）为 {@code null}；默认构造共享同一个 HttpClient。 */
+    private final HttpClient httpClient;
 
     public ApiClient() {
         this(ConfigRuntime.apiBase(), Duration.ofMillis(ConfigRuntime.timeoutMs()));
@@ -82,18 +84,56 @@ public final class ApiClient {
     }
 
     public ApiClient(String base, Duration timeout) {
-        this(base, timeout, httpGetter(base, timeout));
+        this(base, timeout, sharedHttpClient());
+    }
+
+    /** 走共享 HttpClient，请求级超时仍按本次的 {@code timeout}。 */
+    private ApiClient(String base, Duration timeout, HttpClient client) {
+        this(base, timeout, client, httpGetter(client, base, timeout));
     }
 
     ApiClient(String base, Getter getter) {
-        this(base, Duration.ofMillis(DEFAULT_TIMEOUT_MS), getter);
+        this(base, Duration.ofMillis(DEFAULT_TIMEOUT_MS), null, getter);
     }
 
     ApiClient(String base, Duration timeout, Getter getter) {
+        this(base, timeout, null, getter);
+    }
+
+    private ApiClient(String base, Duration timeout, HttpClient httpClient, Getter getter) {
         this.base = (base == null || base.isBlank()) ? DEFAULT_BASE : trimSlash(base);
         this.timeout = (timeout == null || timeout.isNegative() || timeout.isZero())
                 ? Duration.ofMillis(DEFAULT_TIMEOUT_MS) : timeout;
         this.getter = getter;
+        this.httpClient = httpClient;
+    }
+
+    /**
+     * 全进程共用的 {@link HttpClient}。每轮行情刷新都 {@code new} 一个的话，
+     * 每个实例都带自己的 selector / 连接池线程，长会话里只增不减（2026-09-28 计划 S3）。
+     * 惰性单例：第一次用到才建，测试里不建。
+     */
+    static HttpClient sharedHttpClient() {
+        HttpClient c = SHARED_HTTP_CLIENT;
+        if (c == null) {
+            synchronized (ApiClient.class) {
+                c = SHARED_HTTP_CLIENT;
+                if (c == null) {
+                    c = HttpClient.newBuilder()
+                            .connectTimeout(Duration.ofMillis(DEFAULT_TIMEOUT_MS))
+                            .build();
+                    SHARED_HTTP_CLIENT = c;
+                }
+            }
+        }
+        return c;
+    }
+
+    private static volatile HttpClient SHARED_HTTP_CLIENT;
+
+    /** 仅测试：默认构造是否共享同一个 HttpClient。 */
+    HttpClient httpClientForTest() {
+        return httpClient;
     }
 
     public String base() {
@@ -260,12 +300,9 @@ public final class ApiClient {
                 CompanyView.Source.API);
     }
 
-    private static Getter httpGetter(String base, Duration timeout) {
+    private static Getter httpGetter(HttpClient client, String base, Duration timeout) {
         String root = trimSlash(base);
         Duration t = (timeout == null) ? Duration.ofMillis(DEFAULT_TIMEOUT_MS) : timeout;
-        HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(t)
-                .build();
         return path -> {
             HttpRequest req = HttpRequest.newBuilder(URI.create(root + path))
                     .timeout(t)

@@ -335,6 +335,13 @@ public final class StockBoardScreen extends Screen {
     @Override
     public boolean keyPressed(KeyInput input) {
         int key = input.key();
+        if (key == GLFW.GLFW_KEY_K) {
+            // 再按 K 关盘面。Screen 打开时全局 wasPressed 不累加，这个分支才是 K 的真正出口。
+            if (this.client != null) {
+                this.client.setScreen(null);
+            }
+            return true;
+        }
         if (key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) {
             openDetail();
             return true;
