@@ -185,6 +185,30 @@ public final class SnapshotStore {
         return next;
     }
 
+    /**
+     * 断线复位：把上一会话验证过的 {@code market_id} 全部抹成未知。
+     * 编号只在「本轮 API 现读成功」时才有资格存活（红线：不许拿上次读到的号下单）。
+     * 界面数字不消失——公司行保留，只是编号归未知、不能下单。
+     * 只改内存，不落 JSONL（JSONL 的行本来就不存验证过的编号语义）。
+     */
+    public synchronized void wipeIds() {
+        StockSnapshot cur = snapshot;
+        if (!hasKnownIds(cur)) {
+            return;
+        }
+        snapshot = cur.withIdsFrom(java.util.Map.of());
+        BcStockLog.info("快照：断线抹除上一会话的 market_id（公司行保留，重连后等本轮 API 现读）");
+    }
+
+    private static boolean hasKnownIds(StockSnapshot s) {
+        for (CompanyView c : s.companies()) {
+            if (c != null && c.marketIdKnown()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ------------------------------------------------------------------
 
     private static String describeHoldings(StockSnapshot s) {

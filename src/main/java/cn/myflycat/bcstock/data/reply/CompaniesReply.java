@@ -103,7 +103,8 @@ public final class CompaniesReply {
                     && !line.startsWith("价格:")
                     && !line.startsWith("风险")
                     && !line.startsWith("可用股数")
-                    && !line.startsWith("历史记录")) {
+                    && !line.startsWith("历史记录")
+                    && !ReplyText.isNoiseLine(line)) {
                 name = line;
                 status = "";
                 price = Double.NaN;

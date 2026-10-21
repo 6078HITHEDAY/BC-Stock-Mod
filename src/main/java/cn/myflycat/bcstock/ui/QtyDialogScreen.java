@@ -143,12 +143,39 @@ public final class QtyDialogScreen extends Screen {
     private void finishWithQty(int qty) {
         Optional<TradeDraft> draft = TradeDraft.create(company, side, qty, wallet, holding);
         if (draft.isEmpty()) {
-            closeBack();
+            // 拒绝必须可见，不能像下单成功了一样无声关窗。
+            error = rejectionReason(qty);
+            if (error == null) {
+                closeBack();
+            }
             return;
         }
         if (onDraftReady != null) {
             onDraftReady.accept(draft.get());
         }
+    }
+
+    /**
+     * 能解释的拒绝给一行提示（留在本屏，可改数量重试）；解释不了的照旧回父屏。
+     */
+    private String rejectionReason(int qty) {
+        if (side == TradeDraft.Side.BUY && (wallet == null || !wallet.known())) {
+            return "余额未知，无法核验，请先 /bal";
+        }
+        if (side == TradeDraft.Side.BUY && wallet.known()
+                && !qtyAffordable(qty)) {
+            return "余额不足（按当前价）";
+        }
+        if (side == TradeDraft.Side.SELL
+                && (holding == null || holding.shares() < qty)) {
+            return "可用股数不足（持有 " + (holding == null ? 0 : holding.shares()) + "）";
+        }
+        return null;
+    }
+
+    private boolean qtyAffordable(int qty) {
+        double est = Math.round(company.price() * qty * 100.0) / 100.0;
+        return wallet.balance() >= est;
     }
 
     private void closeBack() {
@@ -176,6 +203,11 @@ public final class QtyDialogScreen extends Screen {
                     centerX() - this.textRenderer.getWidth(error) / 2,
                     this.height / 2 - 36, UiPalette.DOWN, false);
         }
+    }
+
+    /** 测试用：当前提示行。 */
+    String errorForTest() {
+        return error;
     }
 
     @Override

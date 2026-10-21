@@ -32,7 +32,8 @@ import java.util.regex.Pattern;
 public final class PortfolioReply {
 
     private static final Pattern SHARES = Pattern.compile("股票:\\s*(\\d+)");
-    private static final Pattern TOTAL = Pattern.compile("总价值:\\s*([\\d.]+)");
+    /** 总价值可能有千分位逗号与 K/M/B 单位（大额持仓），不只裸小数。 */
+    private static final Pattern TOTAL = Pattern.compile("总价值:\\s*([\\d,]+(?:\\.\\d+)?)\\s*([KMB])?");
 
     private PortfolioReply() {
     }
@@ -87,6 +88,16 @@ public final class PortfolioReply {
             Matcher totalMatch = TOTAL.matcher(line);
             if (line.startsWith("总价值:") && totalMatch.find()) {
                 value = ReplyText.parsePlainNumber(totalMatch.group(1));
+                if (!Double.isNaN(value)) {
+                    String unit = totalMatch.group(2);
+                    if ("K".equalsIgnoreCase(unit)) {
+                        value *= 1_000.0;
+                    } else if ("M".equalsIgnoreCase(unit)) {
+                        value *= 1_000_000.0;
+                    } else if ("B".equalsIgnoreCase(unit)) {
+                        value *= 1_000_000_000.0;
+                    }
+                }
                 if (name != null && shares != null && value != null && !Double.isNaN(value)) {
                     holdings.add(new HoldingView(
                             name, CompanyView.ID_UNKNOWN, "", shares, value, Double.NaN));
@@ -98,19 +109,11 @@ public final class PortfolioReply {
             }
             if (!line.startsWith("股票:") && !line.startsWith("总价值:")
                     && !line.contains("帕拉伦股市")
-                    && !isNoiseLine(line)) {
+                    && !ReplyText.isNoiseLine(line)) {
                 name = line;
             }
         }
         return Optional.of(List.copyOf(holdings));
-    }
-
-    /** 进退服 / 暂离广播，不能当成公司名。 */
-    private static boolean isNoiseLine(String line) {
-        return line.startsWith("*")
-                || line.contains("加入了游戏")
-                || line.contains("退出了游戏")
-                || line.contains("暂时离开");
     }
 
     private static Long parseLong(String raw) {

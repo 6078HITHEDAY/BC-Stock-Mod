@@ -363,4 +363,16 @@ public final class InvestProbe {
         dumpsThisSession = 0;
         lastSignature = Long.MIN_VALUE;
     }
+
+    /**
+     * 断线复位：丢掉上一会话的 handler 引用与节流计时。
+     * 不复位的话旧 ScreenHandler 会一直挂着（内存泄漏），下次进服前一拍
+     * 还可能拿旧服状态当新服状态。
+     */
+    public static void reset() {
+        if (watched != null) {
+            stopWatching("断线复位");
+        }
+        SCREEN_LOG.reset();
+    }
 }

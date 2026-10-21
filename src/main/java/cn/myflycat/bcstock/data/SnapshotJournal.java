@@ -194,20 +194,18 @@ public final class SnapshotJournal {
         return n;
     }
 
-    /** 读最后一条<b>完整</b>非空行（跳过聊天增量残缺行）。没有文件或全空 → empty。 */
+    /** 读最后一条<b>完整</b>非空行（跳过聊天增量残缺行）。没有文件 / 全是增量 → empty。 */
     public Optional<StockSnapshot> last() {
         if (!file.isFile()) {
             return Optional.empty();
         }
         try (BufferedReader reader = Files.newBufferedReader(file.toPath(), StandardCharsets.UTF_8)) {
             String lastFull = null;
-            String lastAny = null;
             String line;
             while ((line = reader.readLine()) != null) {
                 if (line.isBlank()) {
                     continue;
                 }
-                lastAny = line;
                 JournalLine parsed;
                 try {
                     parsed = GSON.fromJson(line, JournalLine.class);
@@ -218,11 +216,11 @@ public final class SnapshotJournal {
                     lastFull = line;
                 }
             }
-            String chosen = lastFull != null ? lastFull : lastAny;
-            if (chosen == null) {
+            if (lastFull == null) {
+                // 只有增量行 = 还没写出过完整快照，恢复会缺公司/持仓；宁可空，不给残缺数据。
                 return Optional.empty();
             }
-            return Optional.of(fromLine(GSON.fromJson(chosen, JournalLine.class)));
+            return Optional.of(fromLine(GSON.fromJson(lastFull, JournalLine.class)));
         } catch (Exception e) {
             BcStockLog.warn("快照读取失败：{}", e.toString());
             return Optional.empty();

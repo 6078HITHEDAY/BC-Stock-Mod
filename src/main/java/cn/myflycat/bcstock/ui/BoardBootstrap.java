@@ -42,12 +42,10 @@ public final class BoardBootstrap {
                     if (!ServerGate.active()) {
                         continue;
                     }
-                    if (client.currentScreen instanceof StockBoardScreen) {
-                        client.setScreen(null);
-                    } else {
-                        client.setScreen(new StockBoardScreen());
-                        BoardOpenPull.onOpen(CommandGateway.SHARED);
-                    }
+                    // 盘面开着时 K 到不了这里（Screen 打开时 wasPressed 不累加），
+                    // 关盘面由 StockBoardScreen.keyPressed 自己认 K。
+                    client.setScreen(new StockBoardScreen());
+                    BoardOpenPull.onOpen(CommandGateway.SHARED);
                 }
             }
             // 门禁关（断线 / 非目标服）：关掉已打开的盘面与子屏。

@@ -219,7 +219,18 @@ public final class BcStockClient implements ClientModInitializer {
         });
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             ServerGate.clear();
+            // 网关排队单 / 对账定时器锚在墙上时钟上，跨断线不清会在重连后
+            // 无确认补发买卖——真钱。必须赶在账本关闭前把排队单标进账本。
+            CommandGateway.SHARED.resetForDisconnect();
             LedgerRuntime.onDisconnect();
+            // 上一会话验证过的 market_id 不许带进下一会话：重连后必须等本轮 API
+            // 现读（快照内存还在，界面数字不消失，只是编号归未知、不能下单）。
+            SnapshotStore.SHARED.wipeIds();
+            // 兜底数据源的会话态同样不复用。
+            cn.myflycat.bcstock.probe.InvestProbe.reset();
+            cn.myflycat.bcstock.ui.LocalAlertBridge.resetSession();
+            cn.myflycat.bcstock.data.MarketDataAge.resetSession();
+            cn.myflycat.bcstock.ui.AlertBootstrap.RULES.resetSession();
             // DISCONNECT 可能不在主线程；关盘面丢回主线程。
             client.execute(() -> dismissStockUi(client));
         });

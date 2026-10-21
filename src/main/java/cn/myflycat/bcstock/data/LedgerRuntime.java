@@ -12,12 +12,28 @@ public final class LedgerRuntime {
 
     private static volatile LedgerStore current;
     private static volatile File runDirectory;
+    /**
+     * 有需要收口的未确认单。开单/断线重置时置位，收口完成清掉——
+     * 不置位时 {@link #reconcileUnconfirmedIfReady} 是空操作，
+     * 否则每个 tick 都会对 orders 表跑一次 UPDATE（主线程抢账本锁）。
+     */
+    private static volatile boolean unconfirmedDirty;
 
     private LedgerRuntime() {
     }
 
     public static LedgerStore store() {
         return current;
+    }
+
+    /** 有未确认单需要收口时置位（发单、重进服标 SENT→UNCONFIRMED）。 */
+    public static void markUnconfirmedDirty() {
+        unconfirmedDirty = true;
+    }
+
+    /** 仅测试用：不经过 onJoin 直接挂一个 store。 */
+    public static void testOnlySetStore(LedgerStore store) {
+        current = store;
     }
 
     public static synchronized void onJoin(File runDir, String playerUuid) {
@@ -38,6 +54,7 @@ public final class LedgerRuntime {
         int abandoned = store.markAllSentUnconfirmed(now);
         if (abandoned > 0) {
             BcStockLog.info("账本：{} 笔 SENT 已标成未确认（不重发）", abandoned);
+            markUnconfirmedDirty();
         }
 
         StockSnapshot live = SnapshotStore.SHARED.get();
@@ -93,7 +110,7 @@ public final class LedgerRuntime {
     /** 开盘/采集拿到持仓和余额后，把重进留下的 UNCONFIRMED 收口。 */
     public static void reconcileUnconfirmedIfReady(StockSnapshot snap, long nowMs) {
         LedgerStore store = current;
-        if (store == null || snap == null) {
+        if (store == null || snap == null || !unconfirmedDirty) {
             return;
         }
         if (!snap.holdingsKnown() || !snap.wallet().known()) {
@@ -102,6 +119,10 @@ public final class LedgerRuntime {
         int n = store.reconcileUnconfirmed(nowMs);
         if (n > 0) {
             BcStockLog.info("账本：初始化对账收口 {} 笔未确认单", n);
+        }
+        if (n <= 0) {
+            // 没有可收口的了：关掉脏标记，别每 tick 再打 SQL。
+            unconfirmedDirty = false;
         }
     }
 

@@ -28,9 +28,9 @@ public final class CollectScheduler {
     private BooleanSupplier enabled = BcStockSettings::collectEnabled;
     private CommandGateway gateway = CommandGateway.SHARED;
 
-    private boolean pendingAfterRefresh;
-    private boolean tagNextHoldings;
-    private long tagAtMs = Long.MIN_VALUE;
+    private volatile boolean pendingAfterRefresh;
+    private volatile boolean tagNextHoldings;
+    private volatile long tagAtMs = Long.MIN_VALUE;
     private long lastSkipLogAt = Long.MIN_VALUE / 2;
 
     public CollectScheduler() {
@@ -85,16 +85,17 @@ public final class CollectScheduler {
     }
 
     /**
-     * 行情增量/兜底成功后预约拉持仓。{@link #tick} 在单飞/间隔挡住时重试。
+     * 行情增量/兜底成功后预约拉持仓。只置 flag，<b>不在这里发</b>：
+     * 回调可能跑在行情轮询后台线程上，发命令统一留给主线程 tick（硬规矩）。
+     * {@link #tick} 在单飞/间隔挡住时重试。
      */
     public void requestAfterRefresh() {
         pendingAfterRefresh = true;
-        tryFire("refresh");
     }
 
     public void tick() {
         if (pendingAfterRefresh) {
-            tryFire("retry");
+            tryFire("refresh");
         }
     }
 

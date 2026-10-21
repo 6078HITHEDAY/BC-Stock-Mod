@@ -34,8 +34,7 @@ public final class TradeConfirmDialog {
                 + " × 数量 " + draft.qty()
                 + " = 预计 " + TradeDraft.money(draft.estimated()));
         out.add(taxLine(draft, phase));
-        out.add("当前余额 " + TradeDraft.money(draft.wallet())
-                + " → 预计剩余 " + TradeDraft.money(draft.walletAfter()));
+        out.add(balanceLine(draft));
         if (!draft.canAfford()) {
             out.add("余额不足（按实时价）");
         }
@@ -62,5 +61,14 @@ public final class TradeConfirmDialog {
         }
         return "交税 " + TradeDraft.money(tax)
                 + " (" + String.format(Locale.ROOT, "%.2f", draft.taxPct()) + "%)";
+    }
+
+    /** 余额未知（卖出不核验余额）→ 显示「--」，不显示 NaN。 */
+    static String balanceLine(TradeDraft draft) {
+        if (Double.isNaN(draft.wallet())) {
+            return "当前余额 --（未知，可先 /bal）";
+        }
+        return "当前余额 " + TradeDraft.money(draft.wallet())
+                + " → 预计剩余 " + TradeDraft.money(draft.walletAfter());
     }
 }

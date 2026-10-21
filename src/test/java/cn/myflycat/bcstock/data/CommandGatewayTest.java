@@ -351,7 +351,7 @@ class CommandGatewayTest {
             CommandGateway g = gateway(clock, sender);
 
             assertTrue(g.trySendBuy(56, 1));
-            g.onChatLine("从未实测的成功样子");
+            g.onChatLine("帕拉伦股市 > 从未实测的成功样子");
             clock.advance(CommandGateway.SETTLE_MS);
             g.tick();
             assertEquals(1, sender.sent.size());
@@ -374,7 +374,7 @@ class CommandGatewayTest {
             assertFalse(g.trySendPortfolio(), "普通采集仍受冷却");
 
             assertTrue(g.trySendSell(56, 1));
-            g.onChatLine("从未实测的成功样子");
+            g.onChatLine("帕拉伦股市 > 从未实测的成功样子");
             clock.advance(CommandGateway.SETTLE_MS);
             g.tick();
             clock.advance(CommandGateway.RECONCILE_DELAY_MS - CommandGateway.SETTLE_MS);
@@ -391,7 +391,7 @@ class CommandGatewayTest {
             CommandGateway g = gateway(clock, sender);
 
             assertTrue(g.trySendSell(56, 1));
-            g.onChatLine("从未实测的成功样子");
+            g.onChatLine("帕拉伦股市 > 从未实测的成功样子");
             clock.advance(CommandGateway.SETTLE_MS);
             g.tick();
 
@@ -471,7 +471,7 @@ class CommandGatewayTest {
         }
 
         @Test
-        @DisplayName("已实测错误前缀 → error；其它回执一律未确认")
+        @DisplayName("已实测错误前缀 → error；带前缀的未知文案也按 TradeReply 归类；超时才未确认")
         void knownErrorOnlyElseUnconfirmed() {
             FakeClock clock = new FakeClock();
             RecordingSender sender = new RecordingSender();
@@ -484,15 +484,26 @@ class CommandGatewayTest {
             assertFalse(g.lastTrade().get().confirmed());
             assertFalse(g.inFlight());
 
+            // 带前缀的回执行都会被 TradeReply 归类（成功或失败）——这条按失败算
             clock.advance(CommandGateway.MIN_GAP_MS);
             assertTrue(g.trySendSell(56, 1));
-            g.onChatLine("随便一行从未实测的成功样子");
+            g.onChatLine("帕拉伦股市 > 随便一行从未实测的成功样子");
+            assertTrue(g.lastTrade().isPresent());
+            assertTrue(g.lastTrade().get().error(), "带前缀的未知文案按错误前缀归类");
+            assertFalse(g.inFlight());
+
+            // 「未确认」的真实来源是超时（回执一直没来）
+            clock.advance(CommandGateway.MIN_GAP_MS);
+            assertTrue(g.trySendBuy(56, 1));
             clock.advance(CommandGateway.SETTLE_MS);
             g.tick();
+            assertFalse(g.lastTrade().isPresent() && g.lastTrade().get().confirmed(),
+                    "没回执不许编成功");
+            clock.advance(CommandGateway.TIMEOUT_MS);
+            g.tick();
             assertTrue(g.lastTrade().isPresent());
+            assertFalse(g.lastTrade().get().confirmed(), "超时=未确认");
             assertFalse(g.lastTrade().get().error());
-            assertFalse(g.lastTrade().get().confirmed(), "不许编成功格式");
-            assertTrue(g.lastTrade().get().message().contains("未确认"));
         }
     }
 

@@ -73,6 +73,8 @@ public final class InvestProbeBootstrap {
                     // 吃掉按键，非目标服不 dump
                 }
             }
+            // 上一会话的容器引用不复用：断线复位只跑一次，之后这里就空转。
+            InvestProbe.reset();
             return;
         }
         if (probeKey != null) {

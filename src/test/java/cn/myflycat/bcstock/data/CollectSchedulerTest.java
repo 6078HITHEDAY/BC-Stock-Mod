@@ -26,7 +26,7 @@ class CollectSchedulerTest {
     }
 
     @Test
-    @DisplayName("★ 行情刷新后才发；只发一次 portfolio")
+    @DisplayName("★ 行情刷新后才发；只发一次 portfolio（发送发生在 tick，不在 request 里）")
     void requestAfterRefreshSendsOnce() {
         AtomicLong clock = new AtomicLong(1_000_000L);
         AtomicBoolean connected = new AtomicBoolean(true);
@@ -37,11 +37,15 @@ class CollectSchedulerTest {
         sched.tick();
         assertTrue(sender.sent.isEmpty(), "没有刷新预约不发");
 
+        // requestAfterRefresh 只置 flag；真实调用方在轮询后台线程，不许从那里发。
         sched.requestAfterRefresh();
+        assertTrue(sender.sent.isEmpty(), "request 本身不许发命令（可能跑在后台线程）");
+        sched.tick();
         assertEquals(List.of("invest portfolio"), sender.sent);
         feed(g, CmdSamples.lines("portfolio-held.txt"));
         clock.addAndGet(CommandGateway.MIN_GAP_MS);
         sched.requestAfterRefresh();
+        sched.tick();
         assertEquals(1, sender.sent.size(), "采集冷却期内不重发");
     }
 
@@ -103,6 +107,7 @@ class CollectSchedulerTest {
         CollectScheduler.SHARED.clearCollectTag();
 
         CollectScheduler.SHARED.requestAfterRefresh();
+        CollectScheduler.SHARED.tick();
         assertTrue(CollectScheduler.SHARED.pendingCollectTag(), "发出后标记应挂着");
         clock.addAndGet(CollectScheduler.TAG_TTL_MS + 1);
         assertFalse(CollectScheduler.SHARED.pendingCollectTag(), "超时后标记必须失效");
@@ -130,6 +135,7 @@ class CollectSchedulerTest {
         store.setJournal(journal);
 
         sched.requestAfterRefresh();
+        sched.tick();
         assertTrue(sched.pendingCollectTag());
         feed(g, CmdSamples.lines("portfolio-held.txt"));
         BoardOpenPull.drainToStore(g, store, Instant.EPOCH, "collect");

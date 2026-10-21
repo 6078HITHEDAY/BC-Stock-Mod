@@ -242,16 +242,16 @@ public final class CommandGateway {
                                               long existingOrderId) {
         if (AutoTradeSettings.kill()) {
             BcStockLog.info("命令跳过：auto.kill=true，拒绝下单 marketId={} qty={}", marketId, qty);
-            return false;
+            return cancelRequeued(existingOrderId, "auto.kill");
         }
         if (marketId < 0 || qty < 1) {
             BcStockLog.info("命令跳过：下单参数非法 marketId={} qty={}", marketId, qty);
-            return false;
+            return cancelRequeued(existingOrderId, "参数非法");
         }
         if (kind == Kind.BUY && qty > TradeSettings.MAX_CUSTOM_QTY) {
             BcStockLog.info("命令跳过：买入超过上限 {} marketId={} qty={}",
                     TradeSettings.MAX_CUSTOM_QTY, marketId, qty);
-            return false;
+            return cancelRequeued(existingOrderId, "超上限");
         }
         lastTrade = Optional.empty();
         String verb = (kind == Kind.BUY) ? "buy" : "sell";
@@ -286,6 +286,20 @@ public final class CommandGateway {
                 && lastSentKind == Kind.COMPANY_INFO
                 && lastSentMarketId == marketId
                 && marketId >= 0;
+    }
+
+    /**
+     * 重入路径（{@link #maybeSendQueued}）带着已存在的账本单进来却没过校验：
+     * 单子必须标取消，不能永远挂在 PENDING 上。
+     */
+    private boolean cancelRequeued(long orderId, String reason) {
+        if (orderId >= 0) {
+            LedgerStore ledger = ledger();
+            if (ledger != null) {
+                ledger.markCancelled(orderId, reason);
+            }
+        }
+        return false;
     }
 
     private boolean blockedForNow(Kind kind, int marketId) {
@@ -368,6 +382,53 @@ public final class CommandGateway {
         queuedDraft = null;
         queuedOrigin = OrderRecord.Origin.MANUAL;
         return true;
+    }
+
+    /**
+     * 断线复位：清排队单（账本记「断线」）、在飞单按未确认收口、撤销对账预约、清最近回执缓存。
+     *
+     * <p>对账定时器锚在 {@code System.currentTimeMillis} 上，跨断线不清的话，
+     * 重连完成后 {@link #maybeSendQueued} / {@link #maybeReconcile} 会把断线前
+     * 排队的买单在<b>没有任何确认交互</b>的情况下补发出去——真钱。
+     * 在飞单同样收口：断线后回执永远等不到，挂着只会挡住下一轮单飞。
+     */
+    public synchronized void resetForDisconnect() {
+        if (queuedKind != null) {
+            if (queuedOrderId >= 0) {
+                LedgerStore ledger = ledger();
+                if (ledger != null) {
+                    ledger.markCancelled(queuedOrderId, "断线");
+                }
+            }
+            LedgerProbe.info("断线取消排队 {}", queuedKind);
+        }
+        queuedKind = null;
+        queuedMarketId = CompanyView.ID_UNKNOWN;
+        queuedQty = 0;
+        queuedOrderId = -1L;
+        queuedDraft = null;
+        queuedOrigin = OrderRecord.Origin.MANUAL;
+        if (inFlightKind == Kind.BUY || inFlightKind == Kind.SELL) {
+            if (inFlightOrderId >= 0) {
+                LedgerStore ledger = ledger();
+                if (ledger != null) {
+                    ledger.markUnconfirmed(inFlightOrderId, clock.getAsLong());
+                    LedgerRuntime.markUnconfirmedDirty();
+                }
+            }
+            LedgerProbe.info("断线收口在飞单 {}", inFlightKind);
+        }
+        clearFlight();
+        reconcileAt = Long.MAX_VALUE;
+        reconcileDeadline = Long.MAX_VALUE;
+        reconcileNeedBal = false;
+        reconcileAwaitingPortfolioDone = false;
+        ledgerOptimistic = false;
+        lastBalance = Optional.empty();
+        lastHoldings = Optional.empty();
+        lastCompany = Optional.empty();
+        lastCompanies = Optional.empty();
+        lastCollectSentAt.clear();
     }
 
     public synchronized void markOptimisticLedger() {
@@ -479,6 +540,14 @@ public final class CommandGateway {
         sawBlockStart = false;
         sawBlockEnd = false;
         lastTimedOut = false;
+        if (kind == Kind.BUY || kind == Kind.SELL) {
+            // 上一单的回执不许串台到这一单。
+            lastTrade = Optional.empty();
+        }
+        if (kind == Kind.PORTFOLIO) {
+            // 上一份持仓不许被下一轮 drainToStore 当成本轮回执消费（collect 标记串台）。
+            lastHoldings = Optional.empty();
+        }
         lastAnySentAt = now;
         lastSentKind = kind;
         lastSentMarketId = marketId;
@@ -695,9 +764,13 @@ public final class CommandGateway {
 
     /**
      * 块类命令只收块开始之后的行（进退服广播不要进 collected）。
-     * 错误前缀没有块，始终收。
+     * 错误前缀没有块，始终收。买卖回执只有「帕拉伦股市 &gt;」前缀行——
+     * 飞行途中的进退服广播等杂行不收，否则凑数触发 settle 会把真回执判成「未确认」。
      */
     private boolean acceptLine(String line) {
+        if (inFlightKind == Kind.BUY || inFlightKind == Kind.SELL) {
+            return !line.isEmpty() && ReplyText.isStockReply(line);
+        }
         if (inFlightKind != Kind.PORTFOLIO
                 && inFlightKind != Kind.COMPANY_INFO
                 && inFlightKind != Kind.COMPANIES) {
@@ -790,6 +863,7 @@ public final class CommandGateway {
         LedgerStore ledger = ledger();
         if (ledger != null && inFlightOrderId >= 0) {
             ledger.markUnconfirmed(inFlightOrderId, now);
+            LedgerRuntime.markUnconfirmedDirty();
         }
     }
 
