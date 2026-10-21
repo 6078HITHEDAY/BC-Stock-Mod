@@ -148,11 +148,15 @@ public final class AutoTradePlanner {
 
     static int clampQty(int advised, TradeDraft.Side side, CompanyView company,
                         WalletView wallet, Limits limits) {
+        if (limits.mode() == AutoTradeSettings.Mode.LIMITED && limits.maxPerTrade() < 1) {
+            // 0 = 禁用该笔交易（2026-10-21 拍板）。想自动单至少 1 股就写 1。
+            return 0;
+        }
         int qty = advised;
         if (side == TradeDraft.Side.BUY) {
             qty = Math.min(qty, TradeSettings.MAX_CUSTOM_QTY);
             if (limits.mode() == AutoTradeSettings.Mode.LIMITED) {
-                qty = Math.min(qty, Math.max(1, limits.maxPerTrade()));
+                qty = Math.min(qty, limits.maxPerTrade());
                 int remain = limits.maxPerDay() - limits.filledToday();
                 qty = Math.min(qty, Math.max(0, remain));
             }
@@ -163,9 +167,8 @@ public final class AutoTradePlanner {
                 qty = Math.min(qty, Math.max(0, affordable));
             }
         } else if (limits.mode() == AutoTradeSettings.Mode.LIMITED) {
-            qty = Math.min(qty, Math.max(1, limits.maxPerTrade()));
-            int remain = limits.maxPerDay() - limits.filledToday();
-            qty = Math.min(qty, Math.max(0, remain));
+            qty = Math.min(qty, limits.maxPerTrade());
+            // 止损卖出绕过单日上限（2026-10-21 拍板）：保护性卖出是风控，不许被日限夹死。
         }
         return qty;
     }
@@ -183,5 +186,20 @@ public final class AutoTradePlanner {
             }
         }
         return false;
+    }
+
+    /**
+     * 实时价下的数量重夹：与 {@link #clampQty} 同一套限额，但余额/现金底线按实时价算
+     * （自动单先查实时价，2026-10-21 拍板）。
+     */
+    public static int clampQtyForLive(TradeDraft.Side side, int advised, CompanyView company,
+                                      WalletView wallet, Limits limits, double livePrice) {
+        int qty = clampQty(advised, side, company, wallet, limits);
+        if (side == TradeDraft.Side.BUY && wallet.known() && livePrice > 0) {
+            double room = wallet.balance() - limits.cashFloor();
+            int affordable = (int) Math.floor(room / livePrice);
+            qty = Math.min(qty, Math.max(0, affordable));
+        }
+        return qty;
     }
 }

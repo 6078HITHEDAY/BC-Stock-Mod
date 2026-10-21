@@ -58,7 +58,8 @@ public final class AutoTradeSettings {
         allowBuy = allowBuyValue;
         allowSell = allowSellValue;
         cooldownSec = Math.max(0, cooldownSecValue);
-        cashFloor = Double.isNaN(cashFloorValue) ? 0.0 : cashFloorValue;
+        // 负值夹到 0：负底线等效于 0（余额兜底不会超支），但会静默跳过标的，不如显式归零。
+        cashFloor = Double.isNaN(cashFloorValue) ? 0.0 : Math.max(0.0, cashFloorValue);
         whitelistRaw = whitelistValue == null ? "" : whitelistValue;
     }
 

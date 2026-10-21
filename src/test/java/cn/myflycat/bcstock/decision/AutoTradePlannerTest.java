@@ -84,6 +84,60 @@ class AutoTradePlannerTest {
     }
 
     @Test
+    @DisplayName("★ maxPerTrade=0 = 禁用该笔交易（2026-10-21 拍板，不再至少 1 股）")
+    void zeroMaxPerTradeDisables() {
+        AutoTradePlanner.Limits buy = limits(AutoTradeSettings.Mode.LIMITED, 0, 100, 0, 0, List.of());
+        assertTrue(AutoTradePlanner.plan(buyableSnap(), Map.of("月港控股", nearFloor()),
+                DecisionPreset.DEFAULT, buy, 1_000L).isEmpty(), "买入：0 挡死");
+
+        CompanyView c = company();
+        HoldingView win = new HoldingView("月港控股", 56, "", 8, 160.0, 10.0);
+        StockSnapshot snap = StockSnapshot.empty()
+                .withCompanies(List.of(c), true, Instant.EPOCH)
+                .withHoldings(List.of(win), Instant.EPOCH)
+                .withWallet(new WalletView(10_000.0), Instant.EPOCH);
+        AutoTradePlanner.Limits sell = limits(AutoTradeSettings.Mode.LIMITED, 0, 100, 0, 0, List.of());
+        assertTrue(AutoTradePlanner.plan(snap, Map.of("月港控股", nearFloor()),
+                DecisionPreset.DEFAULT, sell, 1_000L).isEmpty(), "卖出：0 同样挡死");
+    }
+
+    @Test
+    @DisplayName("★ 止损卖出绕过单日上限（2026-10-21 拍板）：filledToday 满额仍卖")
+    void stopLossSellBypassesDailyCap() {
+        CompanyView c = company();
+        HoldingView win = new HoldingView("月港控股", 56, "", 8, 160.0, 10.0);
+        StockSnapshot snap = StockSnapshot.empty()
+                .withCompanies(List.of(c), true, Instant.EPOCH)
+                .withHoldings(List.of(win), Instant.EPOCH)
+                .withWallet(new WalletView(10_000.0), Instant.EPOCH);
+        // 单笔 3、当日 5/5 已满：买入会被夹成 0，但卖出仍按 min(建议, 单笔)=3 放行
+        AutoTradePlanner.Limits limits = limits(AutoTradeSettings.Mode.LIMITED, 3, 5, 5, 0, List.of());
+        var intent = AutoTradePlanner.plan(snap, Map.of("月港控股", nearFloor()),
+                DecisionPreset.DEFAULT, limits, 1_000L);
+        assertTrue(intent.isPresent());
+        assertEquals(TradeDraft.Side.SELL, intent.get().side());
+        assertEquals(3, intent.get().qty(), "止损卖出不受当日上限夹断，仍守单笔上限");
+
+        // 对照：同限额下买入必须被日限挡死
+        var buyIntent = AutoTradePlanner.plan(buyableSnap(), Map.of("月港控股", nearFloor()),
+                DecisionPreset.DEFAULT, limits, 1_000L);
+        assertTrue(buyIntent.isEmpty(), "买入仍受单日上限约束");
+    }
+
+    @Test
+    @DisplayName("clampQtyForLive：实时价下余额重夹")
+    void livePriceCapsAffordable() {
+        AutoTradePlanner.Limits limits = limits(AutoTradeSettings.Mode.LIMITED, 10, 100, 0, 0, List.of());
+        WalletView wallet = new WalletView(1_000.0);
+        assertEquals(10, AutoTradePlanner.clampQtyForLive(TradeDraft.Side.BUY, 10,
+                company(), wallet, limits, 61.76), "实时价 61.76，floor(1000/61.76)=16 ≥ 10");
+        assertEquals(5, AutoTradePlanner.clampQtyForLive(TradeDraft.Side.BUY, 10,
+                company(), wallet, limits, 200.0), "实时价 200 → floor(1000/200)=5");
+        assertEquals(10, AutoTradePlanner.clampQtyForLive(TradeDraft.Side.SELL, 10,
+                company(), wallet, limits, 200.0), "卖出不按实时价压余额，只夹单笔上限（限额 10）");
+    }
+
+    @Test
     @DisplayName("冷却未满不交意图")
     void cooldownBlocks() {
         AutoTradePlanner.Limits limits = new AutoTradePlanner.Limits(
