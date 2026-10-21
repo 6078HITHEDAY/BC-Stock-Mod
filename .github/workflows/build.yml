@@ -19,6 +19,11 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # 格式化硬闸门。`build` 里的 `check` 已经依赖 spotlessCheck，
+      # 但单列一步能让「格式违规」与「编译/测试失败」在 CI 上分开暴露。
+      - name: Spotless check
+        run: ./gradlew spotlessCheck --stacktrace
+
       - name: Build and test
         run: ./gradlew build --stacktrace
 

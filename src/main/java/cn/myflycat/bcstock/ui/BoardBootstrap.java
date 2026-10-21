@@ -18,66 +18,63 @@ import org.lwjgl.glfw.GLFW;
 /**
  * 盘面热键。不进 {@code probe/}——任务书禁改探测包，按键挂在展示层。
  *
- * <p>Yarn 无 {@code consumeClick} / {@code InputConstants} / {@code KeyMapping}，
- * 用已在 M0 跑通的 {@code KeyBinding} + {@code wasPressed()}。
+ * <p>Yarn 无 {@code consumeClick} / {@code InputConstants} / {@code KeyMapping}， 用已在 M0 跑通的 {@code
+ * KeyBinding} + {@code wasPressed()}。
  */
 public final class BoardBootstrap {
 
-    public static final String KEY_TRANSLATION = "key.bcstock.board";
+  public static final String KEY_TRANSLATION = "key.bcstock.board";
 
-    private static KeyBinding boardKey;
+  private static KeyBinding boardKey;
 
-    private BoardBootstrap() {
-    }
+  private BoardBootstrap() {}
 
-    public static void register() {
-        boardKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                KEY_TRANSLATION,
-                InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_K,
-                KeyBinding.Category.MISC));
-        ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (boardKey != null) {
-                while (boardKey.wasPressed()) {
-                    if (!ServerGate.active()) {
-                        continue;
-                    }
-                    // 盘面开着时 K 到不了这里（Screen 打开时 wasPressed 不累加），
-                    // 关盘面由 StockBoardScreen.keyPressed 自己认 K。
-                    client.setScreen(new StockBoardScreen());
-                    BoardOpenPull.onOpen(CommandGateway.SHARED);
-                }
+  public static void register() {
+    boardKey =
+        KeyBindingHelper.registerKeyBinding(
+            new KeyBinding(
+                KEY_TRANSLATION, InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_K, KeyBinding.Category.MISC));
+    ClientTickEvents.END_CLIENT_TICK.register(
+        client -> {
+          if (boardKey != null) {
+            while (boardKey.wasPressed()) {
+              if (!ServerGate.active()) {
+                continue;
+              }
+              // 盘面开着时 K 到不了这里（Screen 打开时 wasPressed 不累加），
+              // 关盘面由 StockBoardScreen.keyPressed 自己认 K。
+              client.setScreen(new StockBoardScreen());
+              BoardOpenPull.onOpen(CommandGateway.SHARED);
             }
-            // 门禁关（断线 / 非目标服）：关掉已打开的盘面与子屏。
-            if (!ServerGate.active()) {
-                dismissStockScreens(client);
-                return;
-            }
-            // 盘面开着时续发被单飞挡住的那条；冷却期内会静默拒绝。
-            if (client.currentScreen instanceof StockBoardScreen) {
-                BoardOpenPull.tickWhileOpen(CommandGateway.SHARED);
-            }
-            String holdingsTrigger = CollectScheduler.SHARED.pendingCollectTag() ? "collect" : null;
-            BoardOpenPull.drainToStore(CommandGateway.SHARED, SnapshotStore.SHARED, Instant.now(),
-                    holdingsTrigger);
-        });
-        BcStockLog.info("盘面热键已注册：{}（默认 K）。调试栅格默认关，开用 -D{}", KEY_TRANSLATION,
-                UiPalette.DEBUG_GRID_PROPERTY);
-    }
-
-    /**
-     * 关掉盘面及其子屏（详情 / 数量 / 确认）。门禁关闭或断线时调用。
-     */
-    public static void dismissStockScreens(MinecraftClient client) {
-        if (client == null) {
+          }
+          // 门禁关（断线 / 非目标服）：关掉已打开的盘面与子屏。
+          if (!ServerGate.active()) {
+            dismissStockScreens(client);
             return;
-        }
-        Screen screen = client.currentScreen;
-        if (screen instanceof StockBoardScreen
-                || screen instanceof DetailScreen
-                || screen instanceof QtyDialogScreen
-                || screen instanceof TradeConfirmScreen) {
-            client.setScreen(null);
-        }
+          }
+          // 盘面开着时续发被单飞挡住的那条；冷却期内会静默拒绝。
+          if (client.currentScreen instanceof StockBoardScreen) {
+            BoardOpenPull.tickWhileOpen(CommandGateway.SHARED);
+          }
+          String holdingsTrigger = CollectScheduler.SHARED.pendingCollectTag() ? "collect" : null;
+          BoardOpenPull.drainToStore(
+              CommandGateway.SHARED, SnapshotStore.SHARED, Instant.now(), holdingsTrigger);
+        });
+    BcStockLog.info(
+        "盘面热键已注册：{}（默认 K）。调试栅格默认关，开用 -D{}", KEY_TRANSLATION, UiPalette.DEBUG_GRID_PROPERTY);
+  }
+
+  /** 关掉盘面及其子屏（详情 / 数量 / 确认）。门禁关闭或断线时调用。 */
+  public static void dismissStockScreens(MinecraftClient client) {
+    if (client == null) {
+      return;
     }
+    Screen screen = client.currentScreen;
+    if (screen instanceof StockBoardScreen
+        || screen instanceof DetailScreen
+        || screen instanceof QtyDialogScreen
+        || screen instanceof TradeConfirmScreen) {
+      client.setScreen(null);
+    }
+  }
 }
