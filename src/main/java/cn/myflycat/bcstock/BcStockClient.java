@@ -196,7 +196,7 @@ public final class BcStockClient implements ClientModInitializer {
             }
             String id = (uuid == null) ? "unknown" : uuid.toString();
             LedgerRuntime.onJoin(client.runDirectory, id);
-            Thread poll = new Thread(() -> {
+            Thread poll = BcStockThreads.daemon("bcstock-api", () -> {
                 if (!ServerGate.isCurrent(sessionGen)) {
                     return;
                 }
@@ -213,8 +213,7 @@ public final class BcStockClient implements ClientModInitializer {
                         snap.holdingsKnown() ? snap.holdingsOrEmpty().size() + " 家" : "未知",
                         snap.wallet().known() ? snap.wallet().balance() : "未知",
                         policy);
-            }, "bcstock-api");
-            poll.setDaemon(true);
+            });
             poll.start();
             BcStockLog.info("已连目标服 {}，BC Stock 启用", address);
         });

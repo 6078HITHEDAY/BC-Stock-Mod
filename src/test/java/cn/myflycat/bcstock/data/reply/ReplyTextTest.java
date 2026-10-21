@@ -10,11 +10,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ReplyTextTest {
 
     @Test
-    @DisplayName("价格：42.38 / 1.54 K / 2.78 M")
+    @DisplayName("价格：42.38 / 1.54 K / 2.78 M / 1.2 B")
     void parsePriceUnits() {
         assertEquals(42.38, ReplyText.parsePrice("价格: 42.38"), 1e-9);
         assertEquals(1540.0, ReplyText.parsePrice("价格: 1.54 K"), 1e-9);
         assertEquals(2_780_000.0, ReplyText.parsePrice("价格: 2.78 M"), 1e-9);
+        assertEquals(1_200_000_000.0, ReplyText.parsePrice("价格: 1.2 B"), 1e-9);
         assertTrue(Double.isNaN(ReplyText.parsePrice("状态: 交易中")));
         assertEquals("1.54 K", ReplyText.priceRaw("价格: 1.54 K"));
     }

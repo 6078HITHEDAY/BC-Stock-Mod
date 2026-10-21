@@ -28,15 +28,31 @@ public final class SnapshotJournal {
     public static final String RELATIVE_DIR = "bcstock";
     public static final String FILE_NAME = "snapshots.jsonl";
 
+    /**
+     * 活动文件轮转阈值。实测（2026-10-21，真实例
+     * {@code ~/.minecraftx/instances/bc/bcstock/snapshots.jsonl}）：
+     * 153 行 / 1,539,632 字节，平均 10,062 字节/行，最大单行 14,192 字节
+     * （2026-09-28 首采 142 行 / 1,419,232 字节，量级一致）。
+     * 取 5 MB ≈ 500 行 ≈ 数天游玩量：既能兜住无限增长，又保留足够回看历史。
+     */
+    public static final long MAX_ACTIVE_BYTES = 5_000_000L;
+
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
 
     private final File file;
+    private final long maxBytes;
 
     public SnapshotJournal(File file) {
+        this(file, MAX_ACTIVE_BYTES);
+    }
+
+    /** @param maxBytes 活动文件轮转阈值；测试用小值，生产用 {@link #MAX_ACTIVE_BYTES}。 */
+    public SnapshotJournal(File file, long maxBytes) {
         if (file == null) {
             throw new IllegalArgumentException("journal 文件不能为空");
         }
         this.file = file;
+        this.maxBytes = maxBytes > 0 ? maxBytes : MAX_ACTIVE_BYTES;
     }
 
     public File file() {
@@ -83,18 +99,45 @@ public final class SnapshotJournal {
                 }
             }
             String json = GSON.toJson(line);
+            rotateIfNeeded(line);
             try (FileOutputStream out = new FileOutputStream(file, true);
                  OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8)) {
                 writer.write(json);
                 writer.write('\n');
             }
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
+            // 落盘路径不允许把任何异常抛给调用线程（可能是渲染线程 / 行情刷新线程）。
+            // Gson 对 NaN / Infinity 抛 IllegalArgumentException，归这一类。
             BcStockLog.warn("快照落盘失败：{}", e.toString());
         }
     }
 
     static boolean isDeltaTrigger(String trigger) {
         return "chat".equals(trigger) || "companies".equals(trigger);
+    }
+
+    /**
+     * 活动文件超过阈值时先轮转再写。只在<b>本次要写完整行</b>时轮转——
+     * 这样新文件第一行一定是完整快照，{@link #last()} 不会恢复出残缺数据。
+     * 增量行继续追加到旧文件，等下一次完整行再轮转（最多晚一个刷新周期）。
+     *
+     * <p>只保留一份旧文件（{@code snapshots.jsonl.1}），再轮转就覆盖它：
+     * 历史价值主要在最近的完整快照，旧文件只是排查备查。
+     * 注意 {@link #countTrigger(String)} 只数活动文件——轮转后计数从新文件重新开始。
+     */
+    private void rotateIfNeeded(JournalLine line) {
+        if (line.isDelta() || !file.isFile() || file.length() < maxBytes) {
+            return;
+        }
+        File backup = new File(file.getPath() + ".1");
+        try {
+            Files.move(file.toPath(), backup.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            BcStockLog.info("快照轮转：{} → {}", file.getName(), backup.getName());
+        } catch (IOException e) {
+            // 轮转失败不许连累这一行：继续往旧文件追加，等下次完整行再试。
+            BcStockLog.warn("快照轮转失败（继续追加）：{}", e.toString());
+        }
     }
 
     static List<CompanyView> changedPriceOrStatus(StockSnapshot previous, StockSnapshot next) {
@@ -190,7 +233,7 @@ public final class SnapshotJournal {
         JournalLine line = new JournalLine();
         line.at = s.at().toString();
         line.apiHealthy = s.apiHealthy();
-        line.wallet = s.wallet().known() ? s.wallet().balance() : null;
+        line.wallet = FiniteValues.finiteOrNull(s.wallet().balance());
         line.companies = new ArrayList<>();
         for (CompanyView c : s.companies()) {
             line.companies.add(CompanyLine.from(c));
@@ -226,7 +269,7 @@ public final class SnapshotJournal {
                 holdings.add(h.toView());
             }
         }
-        WalletView wallet = (line.wallet == null || line.wallet.isNaN())
+        WalletView wallet = (line.wallet == null || !Double.isFinite(line.wallet))
                 ? WalletView.UNKNOWN
                 : new WalletView(line.wallet);
         return new StockSnapshot(at, companies, holdings, wallet, line.apiHealthy);
@@ -268,12 +311,12 @@ public final class SnapshotJournal {
             line.name = c.name();
             line.marketId = c.marketId();
             line.apiId = c.apiId();
-            line.price = c.price();
+            line.price = FiniteValues.finiteOrZero(c.price());
             line.priceRaw = c.priceRaw();
-            line.marketCap = Double.isNaN(c.marketCap()) ? null : c.marketCap();
+            line.marketCap = FiniteValues.finiteOrNull(c.marketCap());
             line.marketCapRaw = c.marketCapRaw();
-            line.changePct = Double.isNaN(c.changePct()) ? null : c.changePct();
-            line.totalChangePct = Double.isNaN(c.totalChangePct()) ? null : c.totalChangePct();
+            line.changePct = FiniteValues.finiteOrNull(c.changePct());
+            line.totalChangePct = FiniteValues.finiteOrNull(c.totalChangePct());
             line.status = c.status();
             line.risk = c.risk();
             line.availableShares = c.availableShares();
@@ -292,12 +335,12 @@ public final class SnapshotJournal {
                     name,
                     marketId,
                     apiId,
-                    price,
+                    FiniteValues.finiteOrZero(price),
                     priceRaw == null ? "" : priceRaw,
-                    marketCap == null ? Double.NaN : marketCap,
+                    FiniteValues.orNaN(marketCap),
                     marketCapRaw == null ? "" : marketCapRaw,
-                    changePct == null ? Double.NaN : changePct,
-                    totalChangePct == null ? Double.NaN : totalChangePct,
+                    FiniteValues.orNaN(changePct),
+                    FiniteValues.orNaN(totalChangePct),
                     status == null ? "" : status,
                     risk,
                     availableShares,
@@ -310,7 +353,8 @@ public final class SnapshotJournal {
         int marketId;
         String status;
         long shares;
-        double currentValue;
+        /** {@code null} = 未知；避免 Gson 写 NaN / Infinity 崩。 */
+        Double currentValue;
         Double averageBuyPrice;
 
         static HoldingLine from(HoldingView h) {
@@ -319,8 +363,9 @@ public final class SnapshotJournal {
             line.marketId = h.marketId();
             line.status = h.status();
             line.shares = h.shares();
-            line.currentValue = h.currentValue();
-            line.averageBuyPrice = h.averageBuyPriceKnown() ? h.averageBuyPrice() : null;
+            line.currentValue = FiniteValues.finiteOrNull(h.currentValue());
+            line.averageBuyPrice = h.averageBuyPriceKnown()
+                    ? FiniteValues.finiteOrNull(h.averageBuyPrice()) : null;
             return line;
         }
 
@@ -330,8 +375,8 @@ public final class SnapshotJournal {
                     marketId,
                     status == null ? "" : status,
                     shares,
-                    currentValue,
-                    averageBuyPrice == null ? Double.NaN : averageBuyPrice);
+                    FiniteValues.orNaN(currentValue),
+                    FiniteValues.orNaN(averageBuyPrice));
         }
     }
 }

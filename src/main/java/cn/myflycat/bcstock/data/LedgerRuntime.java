@@ -84,6 +84,10 @@ public final class LedgerRuntime {
         if (store != null) {
             store.close();
         }
+        // 后台池不跨服复用：断线就收，重进服懒重建。
+        MarketPollScheduler.SHARED.shutdown();
+        FloorCache.SHARED.shutdown();
+        KlineCache.SHARED.shutdown();
     }
 
     /** 开盘/采集拿到持仓和余额后，把重进留下的 UNCONFIRMED 收口。 */

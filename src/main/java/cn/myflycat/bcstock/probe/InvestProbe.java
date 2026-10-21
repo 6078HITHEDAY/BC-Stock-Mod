@@ -58,6 +58,9 @@ public final class InvestProbe {
     private static int dumpsThisSession;
     private static long lastSignature = Long.MIN_VALUE;
 
+    // --- 日志节流（同因 15s 一行；只限频，不删日志） ---
+    private static final LogThrottle SCREEN_LOG = new LogThrottle();
+
     private InvestProbe() {
     }
 
@@ -78,9 +81,12 @@ public final class InvestProbe {
             // 不是容器界面 → 可能是聊天栏、别的 mod 的界面、或盖在容器上的一层。
             // 关键：界面被盖住 ≠ 容器没了。这时 player.currentScreenHandler 还是我们的容器，
             // 槽位数据照样能读。所以这里只记录、按需停，绝不无条件停——真服实测就是被这一下踢掉、0 dump 的。
-            BcStockLog.info("检测到非容器界面：{}「{}」（来源={}）{}",
-                    screen.getClass().getSimpleName(), screen.getTitle().getString(), source,
-                    watched == null ? "" : "；容器监视不受影响");
+            // 这类界面很杂（聊天/背包/其它 mod），同因 15s 限频，避免把有用的行淹掉。
+            if (SCREEN_LOG.allow("non-container:" + screen.getClass().getSimpleName())) {
+                BcStockLog.info("检测到非容器界面：{}「{}」（来源={}）{}",
+                        screen.getClass().getSimpleName(), screen.getTitle().getString(), source,
+                        watched == null ? "" : "；容器监视不受影响");
+            }
             PlayerEntity player = MinecraftClient.getInstance().player;
             if (watched != null && (player == null || player.currentScreenHandler != watched)) {
                 stopWatching("容器已不在客户端手上");
@@ -96,9 +102,13 @@ public final class InvestProbe {
         String title = screen.getTitle().getString();
         StockContainerKind kind = StockContainerKind.of(title);
 
-        // 每个容器都打这一行：M0 验收时如果标题匹配失败，看日志就知道服务端实际发的是什么标题。
-        BcStockLog.info("检测到容器界面：标题=「{}」 syncId={} 槽位数={} 识别={}（来源={}）",
-                title, handler.syncId, handler.slots.size(), kind, source);
+        // 每个<b>股市</b>容器都打这一行：M0 验收时如果标题匹配失败，看日志就知道服务端实际发的是什么标题。
+        // 非股市容器（UNKNOWN）种类多且高频道，按标题 15s 限频；已知股市容器不节流。
+        if (kind != StockContainerKind.UNKNOWN
+                || SCREEN_LOG.allow("unknown-container:" + title)) {
+            BcStockLog.info("检测到容器界面：标题=「{}」 syncId={} 槽位数={} 识别={}（来源={}）",
+                    title, handler.syncId, handler.slots.size(), kind, source);
+        }
 
         if (kind == StockContainerKind.UNKNOWN) {
             // 不 dump：玩家自己的背包界面也是 HandledScreen，里面是个人装备，

@@ -77,9 +77,9 @@ public final class MarketCache {
             line.name = c.name();
             line.marketId = c.marketId();
             line.apiId = c.apiId();
-            line.price = Double.isFinite(c.price()) ? c.price() : 0.0;
+            line.price = FiniteValues.finiteOrZero(c.price());
             line.priceRaw = c.priceRaw();
-            line.changePct = Double.isFinite(c.changePct()) ? c.changePct() : null;
+            line.changePct = FiniteValues.finiteOrNull(c.changePct());
             line.status = c.status();
             line.risk = c.risk();
             line.availableShares = c.availableShares();
@@ -92,8 +92,7 @@ public final class MarketCache {
         CompanyView toViewWipingMarketId() {
             String raw = (priceRaw == null || priceRaw.isBlank())
                     ? String.format(Locale.ROOT, "%.2f", price) : priceRaw;
-            double change = (changePct == null || !Double.isFinite(changePct))
-                    ? Double.NaN : changePct;
+            double change = FiniteValues.orNaN(changePct);
             return new CompanyView(
                     name,
                     CompanyView.ID_UNKNOWN,

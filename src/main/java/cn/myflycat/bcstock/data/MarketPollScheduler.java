@@ -1,6 +1,7 @@
 package cn.myflycat.bcstock.data;
 
 import cn.myflycat.bcstock.BcStockLog;
+import cn.myflycat.bcstock.BcStockThreads;
 import java.io.File;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -95,18 +96,32 @@ public final class MarketPollScheduler {
         }
         Instant now = Instant.ofEpochMilli(clock.getAsLong());
         if (result.ok()) {
-            store.updateCompanies(result.companies(), true, now);
+            // 每一小步单独兜底：任何一步失败都不许让整轮刷新的其余步骤作废
+            // （2026-09-27 的事故就是写缓存抛异常，把编号表与地板更新一起带走了）。
+            try {
+                store.updateCompanies(result.companies(), true, now);
+            } catch (RuntimeException e) {
+                BcStockLog.warn("行情刷新：写入公司行失败（继续后续步骤）：{}", e.toString());
+            }
             Map<String, Integer> ids = new LinkedHashMap<>();
             for (CompanyView c : result.companies()) {
                 if (c.marketIdKnown()) {
                     ids.put(c.name(), c.marketId());
                 }
             }
-            store.updateIds(ids, now);
+            try {
+                store.updateIds(ids, now);
+            } catch (RuntimeException e) {
+                BcStockLog.warn("行情刷新：更新编号表失败（继续后续步骤）：{}", e.toString());
+            }
             MarketDataAge.setCompaniesAtMs(now.toEpochMilli());
             File cf = cacheFile;
             if (cf != null) {
-                MarketCache.write(cf, result.companies(), now.toEpochMilli());
+                try {
+                    MarketCache.write(cf, result.companies(), now.toEpochMilli());
+                } catch (RuntimeException e) {
+                    BcStockLog.warn("行情刷新：写行情缓存失败（继续后续步骤）：{}", e.toString());
+                }
             }
             BcStockLog.info("行情刷新：companies={} latest_price_at={} marker={}",
                     result.companies().size(),
@@ -139,6 +154,9 @@ public final class MarketPollScheduler {
             boolean ok = false;
             try {
                 ok = pollOnce(Long.MIN_VALUE, stillValid).ok();
+            } catch (RuntimeException e) {
+                // 兜底：轮次内任何漏网异常都不许杀死工作线程（线程池会重建线程，但这一轮要收尾）。
+                BcStockLog.warn("行情异步刷新异常（本轮作废，线程继续）：{}", e.toString());
             } finally {
                 inFlight.set(false);
                 if (onDone != null) {
@@ -163,12 +181,21 @@ public final class MarketPollScheduler {
 
     private synchronized ExecutorService executor() {
         if (executor == null) {
-            executor = Executors.newSingleThreadExecutor(r -> {
-                Thread t = new Thread(r, "bcstock-market-poll");
-                t.setDaemon(true);
-                return t;
-            });
+            executor = Executors.newSingleThreadExecutor(
+                    BcStockThreads.daemonFactory("bcstock-market-poll"));
         }
         return executor;
+    }
+
+    /**
+     * 断线收口：中断在飞任务并丢掉线程池，下次进服懒重建。
+     * 同步 {@link #pollOnce} 不依赖线程池，照常可用。
+     */
+    public synchronized void shutdown() {
+        if (executor != null) {
+            executor.shutdownNow();
+            executor = null;
+        }
+        inFlight.set(false);
     }
 }

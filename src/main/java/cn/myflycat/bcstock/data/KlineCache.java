@@ -1,6 +1,7 @@
 package cn.myflycat.bcstock.data;
 
 import cn.myflycat.bcstock.BcStockLog;
+import cn.myflycat.bcstock.BcStockThreads;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -117,13 +118,23 @@ public final class KlineCache {
 
     private synchronized ExecutorService executor() {
         if (executor == null) {
-            executor = Executors.newSingleThreadExecutor(r -> {
-                Thread t = new Thread(r, "bcstock-kline");
-                t.setDaemon(true);
-                return t;
-            });
+            executor = Executors.newSingleThreadExecutor(
+                    BcStockThreads.daemonFactory("bcstock-kline"));
         }
         return executor;
+    }
+
+    /**
+     * 断线收口：中断在飞任务并丢掉线程池，下次进服懒重建。
+     * 排队中没来得及跑的条目会永远停在 LOADING，这里一并清掉，
+     * 否则重进服后 {@link #request(int)} 会永远直接 return。
+     */
+    public synchronized void shutdown() {
+        if (executor != null) {
+            executor.shutdownNow();
+            executor = null;
+        }
+        byApiId.entrySet().removeIf(e -> e.getValue().status() == Status.LOADING);
     }
 
     private record Entry(Status status, KlineSeries series, long fetchedAt, long requestedAt) {
