@@ -259,6 +259,9 @@ public final class MarketRefreshCoordinator {
     }
 
     private void maybeAutoTrade() {
+        // 自动单两阶段：tryOnce 规划+发查价，tick 收实时价后完成下单。
+        // 查价在途时 pendingAuto 不再触发新的 tryOnce（AutoTradeExecutor 自己挡）。
+        AutoTradeExecutor.tick(store, gateway, clock.getAsLong());
         if (!pendingAuto) {
             return;
         }

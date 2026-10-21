@@ -227,6 +227,7 @@ public final class BcStockClient implements ClientModInitializer {
             // 现读（快照内存还在，界面数字不消失，只是编号归未知、不能下单）。
             SnapshotStore.SHARED.wipeIds();
             // 兜底数据源的会话态同样不复用。
+            cn.myflycat.bcstock.data.AutoTradeExecutor.resetPending();
             cn.myflycat.bcstock.probe.InvestProbe.reset();
             cn.myflycat.bcstock.ui.LocalAlertBridge.resetSession();
             cn.myflycat.bcstock.data.MarketDataAge.resetSession();

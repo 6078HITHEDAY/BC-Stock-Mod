@@ -50,12 +50,14 @@ class AutoTradeExecutorTest {
         gateway.setSnapshotStore(store);
         AutoTradeSettings.resetForTest();
         TradeSettings.setEnabledForTest(false);
+        AutoTradeExecutor.resetPending();
     }
 
     @AfterEach
     void tearDown() {
         TradeSettings.setEnabledForTest(false);
         AutoTradeSettings.resetForTest();
+        AutoTradeExecutor.resetPending();
     }
 
     @Test
@@ -108,11 +110,96 @@ class AutoTradeExecutorTest {
     }
 
     @Test
-    @DisplayName("★ LIMITED 正常路径：发一条 buy，走既有命令格式")
-    void limitedSendsOneBuy() {
+    @DisplayName("★ LIMITED 正常路径：先查实时价，回执到后按实时价发一条 buy")
+    void limitedQuotesThenSendsOneBuy() {
         TradeSettings.setEnabledForTest(true);
         AutoTradeSettings.setModeForTest(AutoTradeSettings.Mode.LIMITED);
-        assertTrue(AutoTradeExecutor.tryOnce(store, floors, gateway, NOW));
-        assertEquals(List.of("invest buy 7 10"), sent, "preset 默认 10 股，LIMITED 限额内");
+        // 阶段 1：只发查价，不下单
+        assertFalse(AutoTradeExecutor.tryOnce(store, floors, gateway, NOW));
+        assertEquals(List.of("invest company info 7"), sent, "自动单先查实时价（2026-10-21 拍板）");
+        assertTrue(AutoTradeExecutor.pendingForTest());
+        // 阶段 2：喂同一家公司的查价回执 → tick 里按实时价下单
+        for (String line : companyInfoLines(7, 61.76)) {
+            gateway.onChatLine(line);
+        }
+        AutoTradeExecutor.tick(store, gateway, clock.get());
+        assertEquals(List.of("invest company info 7", "invest buy 7 10"), sent,
+                "preset 默认 10 股；查价后同公司下单免 MIN_GAP（既有设计）");
+        assertFalse(AutoTradeExecutor.pendingForTest());
+    }
+
+    @Test
+    @DisplayName("★ 查价回执串台（别的公司）→ 不下单，等下个 tick/超时")
+    void mismatchedQuoteDoesNotTrade() {
+        TradeSettings.setEnabledForTest(true);
+        AutoTradeSettings.setModeForTest(AutoTradeSettings.Mode.LIMITED);
+        assertFalse(AutoTradeExecutor.tryOnce(store, floors, gateway, NOW));
+        for (String line : companyInfoLines(55, 61.76)) {
+            gateway.onChatLine(line);
+        }
+        AutoTradeExecutor.tick(store, gateway, clock.get());
+        assertEquals(List.of("invest company info 7"), sent, "串台回执不触发下单");
+        assertTrue(AutoTradeExecutor.pendingForTest());
+    }
+
+    @Test
+    @DisplayName("★ 查价超时 → 放弃本轮，不下单")
+    void quoteTimeoutAborts() {
+        TradeSettings.setEnabledForTest(true);
+        AutoTradeSettings.setModeForTest(AutoTradeSettings.Mode.LIMITED);
+        assertFalse(AutoTradeExecutor.tryOnce(store, floors, gateway, NOW));
+        AutoTradeExecutor.tick(store, gateway, clock.get()); // 未超时，仍在等
+        assertTrue(AutoTradeExecutor.pendingForTest());
+        clock.set(NOW + AutoTradeExecutor.QUOTE_GIVE_UP_MS + 1);
+        AutoTradeExecutor.tick(store, gateway, clock.get());
+        assertFalse(AutoTradeExecutor.pendingForTest(), "超时放弃");
+        assertEquals(List.of("invest company info 7"), sent, "没查到价就不下单");
+    }
+
+    @Test
+    @DisplayName("★ 实时价比牌价高：余额按实时价重夹，买不起就放弃")
+    void expensiveLiveQuoteCapsQty() {
+        TradeSettings.setEnabledForTest(true);
+        AutoTradeSettings.setModeForTest(AutoTradeSettings.Mode.LIMITED);
+        // 钱包 1_000：牌价 61.76 建议买 10（按牌价够），实时价 200 → floor(1000/200)=5
+        assertFalse(AutoTradeExecutor.tryOnce(store, floors, gateway, NOW));
+        for (String line : companyInfoLines(7, 200.0)) {
+            gateway.onChatLine(line);
+        }
+        AutoTradeExecutor.tick(store, gateway, clock.get());
+        assertEquals(List.of("invest company info 7", "invest buy 7 5"), sent,
+                "按实时价重夹数量：floor(1000/200)=5");
+    }
+
+    @Test
+    @DisplayName("★ 断线复位清在途意图")
+    void resetPendingClearsIntent() {
+        TradeSettings.setEnabledForTest(true);
+        AutoTradeSettings.setModeForTest(AutoTradeSettings.Mode.LIMITED);
+        assertFalse(AutoTradeExecutor.tryOnce(store, floors, gateway, NOW));
+        assertTrue(AutoTradeExecutor.pendingForTest());
+        AutoTradeExecutor.resetPending();
+        assertFalse(AutoTradeExecutor.pendingForTest());
+        AutoTradeExecutor.tick(store, gateway, clock.get());
+        assertEquals(List.of("invest company info 7"), sent, "复位后 tick 不补发");
+    }
+
+    /** company-info 回执黄金样本的参数化版（对齐 cmd-samples/company-info-55.txt 结构）。 */
+    private static List<String> companyInfoLines(int marketId, double price) {
+        return List.of(
+                "-=-=-=-=-=-=-=-=-=-= [帕拉伦股市] =-=-=-=-=-=-=-=-=-=-",
+                "月港控股",
+                "Id: " + marketId,
+                "状态: 交易中",
+                "价格: " + price,
+                "风险等级: 1",
+                "可用股数: 64000",
+                "历史记录: ",
+                "",
+                "  +3.627%",
+                "  -5.855%",
+                "",
+                "[Buy Stocks]",
+                "-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-");
     }
 }
